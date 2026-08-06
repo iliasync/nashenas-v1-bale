@@ -20,33 +20,48 @@ if [ -f "$PID_FILE" ]; then
     OLD_PID=$(tr -dc '0-9' < "$PID_FILE")
 fi
 
-# در اولین دیپلوی ممکن است bot.pid قدیمی توسط Git حذف شده باشد؛ در این حالت
-# پردازش دقیق همین پروژه و همین کاربر cPanel را پیدا می‌کنیم.
-if [ -z "$OLD_PID" ] && command -v pgrep >/dev/null 2>&1; then
-    OLD_PID=$(pgrep -u "$(id -u)" -f "^$PYTHON_BIN $MAIN_FILE$" | head -n 1)
+# همه نمونه‌های main.py متعلق به همین پوشه و همین کاربر را جمع می‌کنیم؛ وجود
+# چند نمونه قدیمی باعث می‌شود بخشی از پیام‌ها به کد قدیمی برسد.
+CANDIDATE_PIDS="$OLD_PID"
+if command -v pgrep >/dev/null 2>&1; then
+    FOUND_PIDS=$(pgrep -u "$(id -u)" -f '(^|/)main\.py([[:space:]]|$)' 2>/dev/null || true)
+    CANDIDATE_PIDS="$CANDIDATE_PIDS $FOUND_PIDS"
 fi
 
-if [ -n "$OLD_PID" ]; then
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        # فقط پردازشی را می‌بندیم که واقعاً main.py همین پروژه باشد.
-        OLD_CMD=$(ps -p "$OLD_PID" -o args= 2>/dev/null)
-        case "$OLD_CMD" in
-            *"$PYTHON_BIN"*"$MAIN_FILE"*)
-                kill "$OLD_PID"
-                for _ in 1 2 3 4 5 6 7 8 9 10; do
-                    kill -0 "$OLD_PID" 2>/dev/null || break
-                    sleep 1
-                done
-                if kill -0 "$OLD_PID" 2>/dev/null; then
-                    kill -KILL "$OLD_PID"
-                fi
-                ;;
-            *)
-                echo "$(date) - Refused to stop unrelated PID $OLD_PID: $OLD_CMD" >> "$LOG_FILE"
-                exit 1
-                ;;
-        esac
-    fi
+VALID_PIDS=""
+for PID in $CANDIDATE_PIDS; do
+    case "$PID" in *[!0-9]*|'') continue ;; esac
+    kill -0 "$PID" 2>/dev/null || continue
+    OLD_CMD=$(ps -p "$PID" -o args= 2>/dev/null)
+    OLD_CWD=$(readlink "/proc/$PID/cwd" 2>/dev/null || true)
+    case "$OLD_CMD" in
+        *"$MAIN_FILE"*) VALID_PIDS="$VALID_PIDS $PID" ;;
+        *"main.py"*)
+            if [ "$OLD_CWD" = "$APP_DIR" ]; then
+                VALID_PIDS="$VALID_PIDS $PID"
+            fi
+            ;;
+        *)
+            echo "$(date) - Ignored unrelated PID $PID: $OLD_CMD" >> "$LOG_FILE"
+            ;;
+    esac
+done
+
+VALID_PIDS=$(printf '%s\n' $VALID_PIDS | awk 'NF && !seen[$1]++ {print $1}')
+if [ -n "$VALID_PIDS" ]; then
+    echo "$(date) - Stopping old bot PID(s): $(echo "$VALID_PIDS" | tr '\n' ' ')" >> "$LOG_FILE"
+    kill $VALID_PIDS 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        STILL_RUNNING=""
+        for PID in $VALID_PIDS; do
+            kill -0 "$PID" 2>/dev/null && STILL_RUNNING="$STILL_RUNNING $PID"
+        done
+        [ -z "$STILL_RUNNING" ] && break
+        sleep 1
+    done
+    for PID in $VALID_PIDS; do
+        kill -0 "$PID" 2>/dev/null && kill -KILL "$PID" 2>/dev/null || true
+    done
 fi
 rm -f "$PID_FILE"
 

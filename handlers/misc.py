@@ -1,6 +1,9 @@
 """دستورهای راهنما / قوانین / میانبرها."""
+import os
+
 from balethon.conditions import equals,private
 
+import config
 import keyboards as kb
 import texts
 from bot_instance import bot
@@ -31,7 +34,26 @@ async def cmd_version(client, message):
     await client.send_message(
         message.chat.id,
         f"🤖 نسخه در حال اجرا: `{version}`\n"
-        "قابلیت: `admin-profile-v2`",
+        f"قابلیت: `{config.BUILD_MARKER}`",
+        reply_to_message_id=message.id,
+    )
+
+
+@bot.on_command(name="diag", min_arguments=0, max_arguments=0, condition=private)
+async def cmd_diag(client, message):
+    uid = str(message.author.id).strip()
+    if not is_admin_id(uid):
+        return
+    await client.send_message(
+        message.chat.id,
+        "🧪 *تشخیص نسخه در حال اجرا*\n\n"
+        f"• PID: `{os.getpid()}`\n"
+        f"• فایل اجرا: `{os.path.abspath(__file__)}`\n"
+        f"• پوشه کاری: `{os.getcwd()}`\n"
+        f"• نسخه: `{config.BUILD_MARKER}`\n"
+        f"• آیدی شما: `{uid}`\n"
+        f"• ادمین‌های تنظیم‌شده: `{','.join(sorted(config.ADMIN_IDS))}`\n"
+        f"• نتیجه تشخیص: {'✅ ادمین' if is_admin_id(uid) else '❌ کاربر عادی'}",
         reply_to_message_id=message.id,
     )
 
