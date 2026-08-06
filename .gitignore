@@ -7,3 +7,6 @@ bot.sqlite3-wal
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.deployed_sha
+auto_deploy.log
+auto_deploy.lock
