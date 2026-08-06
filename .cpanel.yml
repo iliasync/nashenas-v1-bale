@@ -2,5 +2,6 @@
 deployment:
   tasks:
     - /usr/bin/rsync -a --exclude=.git/ --exclude=.env --exclude=bot.pid --exclude=bot.log --exclude=bot.sqlite3 --exclude=bot.sqlite3-shm --exclude=bot.sqlite3-wal --exclude=__pycache__/ --exclude='*.pyc' ./ /home/jowkdwuy/nashenasV2/
+    - /home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python -m pip install --disable-pip-version-check -r /home/jowkdwuy/nashenasV2/requirements.txt
     - /bin/chmod 700 /home/jowkdwuy/nashenasV2/runner.sh
     - /usr/bin/env bash /home/jowkdwuy/nashenasV2/runner.sh
