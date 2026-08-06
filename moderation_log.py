@@ -71,11 +71,17 @@ async def log_report(client, reporter_uid, reporter, target_uid, target, reason_
         "", f"🧾 دلیل گزارش: *{_reason_title(reason_code)}*", f"🔖 کد دلیل: `{reason_code}`",
         f"📝 توضیح همراه اسکرین‌شات: {screenshot_message.caption or 'بدون توضیح'}",
     ]
-    await client.send_message(
+    report_message = await client.send_message(
         int(config.LOG_CHAT_ID), "\n".join(lines),
         reply_markup=kb.ikb_log_moderation(
             target_uid, reporter_uid, "⛔ بن کاربر گزارش‌شده", "⛔ بن گزارش‌دهنده"
         ),
         reply_to_message_id=getattr(copied, "id", None),
     )
+    try:
+        # کارت اطلاعات پین می‌شود تا علت، آیدی‌ها و دکمه‌های مدیریت یکجا در دسترس باشند.
+        await client.pin_chat_message(int(config.LOG_CHAT_ID), report_message.id)
+    except Exception as exc:
+        # نداشتن دسترسی Pin نباید اصل ثبت و ارسال گزارش را ناموفق کند.
+        print(f"pin report failed: {exc}")
     return True
