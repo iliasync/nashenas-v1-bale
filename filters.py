@@ -6,14 +6,11 @@ SQLite ذخیره شده‌اند، نه در یک دیکشنری ساده‌ی 
 برای جلوگیری از کوئری تکراری روی هر آپدیت، نتیجه‌ی fetch روی خودِ آبجکت
 event کش می‌شود (طول عمرش فقط برای همان یک آپدیت است).
 """
-from balethon.conditions import create, author
+from balethon.conditions import create
 from balethon.objects import Message, CallbackQuery
 
 import config
 import database as db
-
-ADMIN_ID_INT = int(config.ADMIN_ID) if str(config.ADMIN_ID).isdigit() else None
-
 
 async def get_event_user(event, create_if_missing: bool = True):
     """دیکشنریِ کاربر را برای این event برمی‌گرداند (با کش روی خودِ event)."""
@@ -38,11 +35,13 @@ def set_event_user(event, user: dict):
 
 
 def is_admin_id(uid) -> bool:
-    return str(uid) == str(config.ADMIN_ID)
+    return str(uid).strip() in config.ADMIN_IDS
 
 
-# دکمه‌ی همیشه true برای فیلتر مدیر (آیدی عددی ادمین)
-admin_only = author(ADMIN_ID_INT) if ADMIN_ID_INT is not None else create()(lambda: False)
+@create(can_process=(Message, CallbackQuery))
+async def admin_only(event) -> bool:
+    """فیلتر مرکزی ادمین؛ از ADMIN_ID و ADMIN_IDS پشتیبانی می‌کند."""
+    return bool(getattr(event, "author", None) and is_admin_id(event.author.id))
 
 
 def state_is(*states):

@@ -12,6 +12,12 @@ BALE_BOT_TOKEN = os.getenv("BALE_BOT_TOKEN", "1133133663:vcFyBB7XRfWwHYVk7dpLlQ8
 
 # آیدی عددی ادمین اصلی پنل
 ADMIN_ID = os.getenv("ADMIN_ID", "519859260")
+# برای چند ادمین می‌توان آیدی‌ها را با کاما جدا کرد. ADMIN_ID همیشه عضو این مجموعه است.
+ADMIN_IDS = {
+    value.strip()
+    for value in (os.getenv("ADMIN_IDS", "") + "," + str(ADMIN_ID)).split(",")
+    if value.strip()
+}
 
 # گروه مشترک لاگ رسانه‌ها و گزارش‌ها. آیدی گروه‌های بله معمولاً منفی است.
 # اگر تنظیم نشود، برای جلوگیری از گم‌شدن لاگ‌ها به ادمین اصلی ارسال می‌شود.

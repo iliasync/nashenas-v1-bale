@@ -4,6 +4,36 @@ from balethon.conditions import equals,private
 import keyboards as kb
 import texts
 from bot_instance import bot
+from filters import is_admin_id
+
+
+@bot.on_command(name="myid", min_arguments=0, max_arguments=0, condition=private)
+async def cmd_myid(client, message):
+    uid = str(message.author.id).strip()
+    await client.send_message(
+        message.chat.id,
+        f"🆔 آیدی عددی شما: `{uid}`\n"
+        f"🔐 تشخیص ادمین: {'✅ بله' if is_admin_id(uid) else '❌ خیر'}",
+        reply_to_message_id=message.id,
+    )
+
+
+@bot.on_command(name="version", min_arguments=0, max_arguments=0, condition=private)
+async def cmd_version(client, message):
+    if not is_admin_id(message.author.id):
+        return
+    version = "manual/zip"
+    try:
+        with open("/home/jowkdwuy/nashenasV2/.deployed_sha", encoding="utf-8") as file:
+            version = file.read().strip() or version
+    except OSError:
+        pass
+    await client.send_message(
+        message.chat.id,
+        f"🤖 نسخه در حال اجرا: `{version}`\n"
+        "قابلیت: `admin-profile-v2`",
+        reply_to_message_id=message.id,
+    )
 
 
 @bot.on_callback_query(equals("show_rules") & private)

@@ -16,9 +16,6 @@ from profile_common import (
 )
 from utils import safe_int, now_ts, silent_status_text
 
-ADMIN_ID_INT = int(config.ADMIN_ID) if str(config.ADMIN_ID).isdigit() else None
-
-
 # ---------------------------------------------------------------------------
 # نمایش پروفایل من / دیگران
 # ---------------------------------------------------------------------------

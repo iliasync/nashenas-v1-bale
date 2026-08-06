@@ -4,6 +4,7 @@ import os
 import config
 import database as db
 import keyboards as kb
+from filters import is_admin_id
 from utils import normalize_gender_text, last_seen_text, distance_text, get_profile_missing_fields, safe_int
 
 DEFAULT_AVATAR_PATH = os.path.join(os.path.dirname(__file__), "Aksss.jpg")
@@ -128,7 +129,7 @@ async def show_user_profile_by_pid(client, viewer_chat_id, viewer_user: dict, pi
         return
 
     viewer_uid = (viewer_user or {}).get("user_id") or viewer_chat_id
-    viewer_is_admin = str(viewer_uid) == str(config.ADMIN_ID)
+    viewer_is_admin = is_admin_id(viewer_uid) or is_admin_id(viewer_chat_id)
     caption = build_user_profile_text(
         viewer_user,
         target_user,
