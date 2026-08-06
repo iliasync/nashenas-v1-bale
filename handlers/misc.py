@@ -48,7 +48,7 @@ async def cmd_diag(client, message):
         message.chat.id,
         "🧪 *تشخیص نسخه در حال اجرا*\n\n"
         f"• PID: `{os.getpid()}`\n"
-        f"• فایل اجرا: `{os.path.abspath(__file__)}`\n"
+        f"• فایل هندلر: `{os.path.abspath(__file__)}`\n"
         f"• پوشه کاری: `{os.getcwd()}`\n"
         f"• نسخه: `{config.BUILD_MARKER}`\n"
         f"• آیدی شما: `{uid}`\n"
