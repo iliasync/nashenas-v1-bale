@@ -61,16 +61,18 @@ async def build_my_profile_text(user: dict) -> str:
     )
 
 
-def build_user_profile_text(viewer_user: dict, target_user: dict) -> str:
+def build_user_profile_text(viewer_user: dict, target_user: dict, target_uid=None, show_numeric_id=False) -> str:
     name = (target_user.get("display_name") or "").strip() or "تعیین نشده"
     city = (target_user.get("city") or "").strip() or "تعیین نشده"
     pid = target_user.get("public_id") or "unknown"
+    numeric_id_line = f"\n• آیدی عددی: `{target_uid}`" if show_numeric_id and target_uid else ""
     return (
         f"• نام: {name}\n"
         f"• جنسیت: {normalize_gender_text(target_user)}\n"
         f"• استان: {(target_user.get('province') or 'تعیین نشده')}\n"
         f"• شهر: {city}\n"
-        f"• سن: {(target_user.get('age') or 'تعیین نشده')}\n\n"
+        f"• سن: {(target_user.get('age') or 'تعیین نشده')}"
+        f"{numeric_id_line}\n\n"
         f"هم اکنون {last_seen_text(target_user)}\n\n"
         f"🆔 آیدی : /user_{pid}\n\n"
         f"🏁 فاصله از شما: {distance_text(viewer_user, target_user)}"
@@ -117,7 +119,6 @@ async def show_my_profile(client, chat_id, user: dict, reply_to_message_id=None)
 
 async def show_user_profile_by_pid(client, viewer_chat_id, viewer_user: dict, pid: str, reply_to_message_id=None):
     target_uid, target_user = await db.get_user_by_public_id(pid)
-    print(target_uid, target_user)
     if not target_user:
         await client.send_message(viewer_chat_id, "⚠️ کاربر پیدا نشد.", reply_to_message_id=reply_to_message_id)
         return
@@ -126,7 +127,12 @@ async def show_user_profile_by_pid(client, viewer_chat_id, viewer_user: dict, pi
         await show_my_profile(client, viewer_chat_id, viewer_user, reply_to_message_id=reply_to_message_id)
         return
 
-    caption = build_user_profile_text(viewer_user, target_user)
+    caption = build_user_profile_text(
+        viewer_user,
+        target_user,
+        target_uid=target_uid,
+        show_numeric_id=str(viewer_chat_id) == str(config.ADMIN_ID),
+    )
     blocked = is_blocked_between(viewer_user, target_user)
     actions = kb.ikb_user_profile_actions(viewer_user, target_user, blocked)
     file_id = (target_user.get("profile_photo_file_id") or "").strip() or None
