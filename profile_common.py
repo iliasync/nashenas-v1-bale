@@ -130,6 +130,11 @@ async def show_user_profile_by_pid(client, viewer_chat_id, viewer_user: dict, pi
 
     viewer_uid = (viewer_user or {}).get("user_id") or viewer_chat_id
     viewer_is_admin = is_admin_id(viewer_uid) or is_admin_id(viewer_chat_id)
+    print(
+        "profile access: "
+        f"viewer_uid={viewer_uid}, chat_id={viewer_chat_id}, target_uid={target_uid}, "
+        f"is_admin={viewer_is_admin}, build={config.BUILD_MARKER}"
+    )
     caption = build_user_profile_text(
         viewer_user,
         target_user,

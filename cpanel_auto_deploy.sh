@@ -42,6 +42,12 @@ if ! /usr/bin/git checkout --quiet main || ! /usr/bin/git merge --ff-only --quie
     exit 1
 fi
 
+# از بازگرداندن نسخه قدیمی GitHub روی نسخه جدیدی که با ZIP نصب شده جلوگیری کن.
+if ! grep -q '^BUILD_MARKER = ' "$REPO_DIR/config.py"; then
+    log "refused to deploy legacy remote $REMOTE_SHA (BUILD_MARKER is missing)"
+    exit 1
+fi
+
 if ! /usr/bin/rsync -a \
     --exclude=.git/ --exclude=.env --exclude=bot.pid --exclude=bot.log \
     --exclude=bot.sqlite3 --exclude=bot.sqlite3-shm --exclude=bot.sqlite3-wal \

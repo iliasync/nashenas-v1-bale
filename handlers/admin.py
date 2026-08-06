@@ -63,7 +63,10 @@ async def cmd_panel(client, message):
     user["admin_state"] = None
     await db.save_user(message.chat.id, user)
     await client.send_message(
-        message.chat.id, "🛠 *پنل مدیریت*\nیکی از گزینه‌ها را انتخاب کنید 👇",
+        message.chat.id,
+        "🛠 *پنل مدیریت*\nیکی از گزینه‌ها را انتخاب کنید 👇\n\n"
+        f"🧩 نسخه: `{config.BUILD_MARKER}`\n"
+        f"🆔 آیدی ادمین تشخیص‌داده‌شده: `{message.author.id}`",
         reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id,
     )
 
