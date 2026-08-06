@@ -1,6 +1,7 @@
 #!/bin/bash
 
 APP_DIR="/home/jowkdwuy/nashenasV2"
+SOURCE_REPO_DIR="/home/jowkdwuy/repositories/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 MAIN_FILE="$APP_DIR/main.py"
 PID_FILE="$APP_DIR/bot.pid"
@@ -36,8 +37,9 @@ for PID in $CANDIDATE_PIDS; do
     OLD_CWD=$(readlink "/proc/$PID/cwd" 2>/dev/null || true)
     case "$OLD_CMD" in
         *"$MAIN_FILE"*) VALID_PIDS="$VALID_PIDS $PID" ;;
+        *"$SOURCE_REPO_DIR/main.py"*) VALID_PIDS="$VALID_PIDS $PID" ;;
         *"main.py"*)
-            if [ "$OLD_CWD" = "$APP_DIR" ]; then
+            if [ "$OLD_CWD" = "$APP_DIR" ] || [ "$OLD_CWD" = "$SOURCE_REPO_DIR" ]; then
                 VALID_PIDS="$VALID_PIDS $PID"
             fi
             ;;
