@@ -6,6 +6,7 @@ import config
 import database as db
 import force_join as fj
 import keyboards as kb
+import moderation_log as modlog
 from bot_instance import bot, runtime
 from filters import get_event_user, set_event_user, state_is, in_active_chat
 from profile_common import is_blocked_between, show_user_profile_by_pid
@@ -222,12 +223,21 @@ async def relay_message_to_partner(client, from_uid_str, message):
         return
 
     if message.photo:
-        file_id = message.photo[-1].id
-        if file_id:
-            try:
-                await client.send_photo(int(other_uid), file_id, caption=message.caption or None,reply_markup=kb.kb_chat_menu())
-            except Exception:
-                pass
+        try:
+            await client.copy_message(int(other_uid), message.chat.id, message.id)
+            await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
+        except Exception:
+            pass
+        return
+
+    if modlog.is_loggable_media(message):
+        try:
+            # copyMessage رسانه را بدون نمایش هویت فرستنده منتقل می‌کند و همه‌ی
+            # انواع فایل بله (ویدئو، ویس، صوت، سند، گیف، استیکر و مخاطب) را پوشش می‌دهد.
+            await client.copy_message(int(other_uid), message.chat.id, message.id)
+            await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
+        except Exception:
+            pass
         return
 
     if message.location is not None:

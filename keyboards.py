@@ -23,6 +23,16 @@ def ikb_row_btn(text, callback_data) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, callback_data=callback_data)
 
 
+def ikb_log_moderation(
+    primary_uid, secondary_uid=None, primary_label="⛔ بن کاربر", secondary_label="⛔ بن کاربر دوم"
+):
+    """دکمه‌های مدیریت زیر لاگ؛ callback فقط برای ادمین اصلی اجرا می‌شود."""
+    rows = [[(primary_label, f"log_ban:{primary_uid}")]]
+    if secondary_uid and str(secondary_uid) != str(primary_uid):
+        rows.append([(secondary_label, f"log_ban:{secondary_uid}")])
+    return ikb(*rows)
+
+
 def rkb(*rows, resize=True, one_time=False, selective=True) -> ReplyKeyboard:
     return ReplyKeyboard(*rows, resize=resize, one_time=one_time, selective=selective)
 

@@ -1,0 +1,9 @@
+.env
+bot.pid
+bot.log
+bot.sqlite3
+bot.sqlite3-shm
+bot.sqlite3-wal
+__pycache__/
+*.py[cod]
+.pytest_cache/

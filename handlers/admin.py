@@ -1,7 +1,7 @@
 """پنل مدیریت ربات (فقط برای ADMIN_ID)."""
 import asyncio
 
-from balethon.conditions import equals,private
+from balethon.conditions import equals, regex, private
 
 import config
 import database as db
@@ -10,6 +10,37 @@ import keyboards as kb
 from bot_instance import bot
 from filters import get_event_user, admin_only, admin_state_is, is_admin_id
 from utils import safe_int, normalize_gender_text, last_seen_text
+
+
+@bot.on_callback_query(regex(r"^log_ban:"))
+async def cb_log_ban_user(client, callback_query):
+    """بن فوری از دکمه‌ی گروه لاگ؛ فقط ادمین اصلی اجازه دارد."""
+    if not is_admin_id(callback_query.author.id):
+        await callback_query.answer("فقط ادمین اصلی اجازه انجام این کار را دارد.", show_alert=True)
+        return
+    target_uid = str(safe_int((callback_query.data or "").split(":", 1)[1], 0))
+    if target_uid == "0":
+        await callback_query.answer("آیدی کاربر نامعتبر است.", show_alert=True)
+        return
+    target = await db.get_user(target_uid, create_if_missing=False)
+    if not target:
+        await callback_query.answer("کاربر در دیتابیس پیدا نشد.", show_alert=True)
+        return
+    if target.get("bot_banned"):
+        await callback_query.answer("این کاربر قبلاً بن شده است.", show_alert=True)
+        return
+    target["bot_banned"] = True
+    await db.save_user(target_uid, target)
+    await callback_query.answer("کاربر از ربات بن شد ✅", show_alert=True)
+    await client.send_message(
+        callback_query.message.chat.id,
+        f"✅ کاربر `{target_uid}` توسط ادمین `{callback_query.author.id}` از ربات بن شد.",
+        reply_to_message_id=callback_query.message.id,
+    )
+    try:
+        await client.send_message(int(target_uid), "⛔ دسترسی شما به ربات مسدود شد.")
+    except Exception:
+        pass
 
 
 async def _send_bulk_message(client, uid, text, retries=2):

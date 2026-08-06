@@ -1,0 +1,5 @@
+---
+deployment:
+  tasks:
+    - /bin/chmod 700 /home/jowkdwuy/nashenasV2/runner.sh
+    - /usr/bin/env bash /home/jowkdwuy/nashenasV2/runner.sh

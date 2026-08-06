@@ -4,6 +4,7 @@ from balethon.conditions import equals, regex,private
 import config
 import database as db
 import keyboards as kb
+import moderation_log as modlog
 import lists
 from bot_instance import bot
 from filters import get_event_user, state_is
@@ -508,18 +509,15 @@ async def cb_report_reason(client, callback_query):
     await callback_query.answer(None)
     user = await get_event_user(callback_query)
     _, pid, code = callback_query.data.split(":", 2)
-    reporter_pid = user.get("public_id")
     reporter_uid = str(callback_query.author.id)
+    target_uid, target_user = await db.get_user_by_public_id(pid)
+    if not target_user:
+        await callback_query.answer("کاربر یافت نشد")
+        return
     try:
-        await client.send_message(
-            int(config.ADMIN_ID),
-            "🚫 *گزارش جدید*\n\n"
-            f"👤 گزارش‌دهنده: `{reporter_uid}` /user_{reporter_pid}\n"
-            f"🎯 کاربر گزارش‌شده: /user_{pid}\n"
-            f"🧾 دلیل: *{code}*",
-        )
-    except Exception:
-        pass
+        await modlog.log_report(client, reporter_uid, user, target_uid, target_user, code)
+    except Exception as exc:
+        print(f"report moderation log failed: {exc}")
     try:
         await client.edit_message_text(
             callback_query.message.chat.id, callback_query.message.id, "✅ گزارش شما ثبت شد و برای بررسی ارسال گردید."
