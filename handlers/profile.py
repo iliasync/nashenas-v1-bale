@@ -509,21 +509,93 @@ async def cb_report_reason(client, callback_query):
     await callback_query.answer(None)
     user = await get_event_user(callback_query)
     _, pid, code = callback_query.data.split(":", 2)
-    reporter_uid = str(callback_query.author.id)
-    target_uid, target_user = await db.get_user_by_public_id(pid)
+    _, target_user = await db.get_user_by_public_id(pid)
     if not target_user:
         await callback_query.answer("کاربر یافت نشد")
         return
-    try:
-        await modlog.log_report(client, reporter_uid, user, target_uid, target_user, code)
-    except Exception as exc:
-        print(f"report moderation log failed: {exc}")
+    user["state"] = "report_wait_screenshot"
+    user["tmp_report_pid"] = pid
+    user["tmp_report_reason"] = code
+    await db.save_user(callback_query.message.chat.id, user)
     try:
         await client.edit_message_text(
-            callback_query.message.chat.id, callback_query.message.id, "✅ گزارش شما ثبت شد و برای بررسی ارسال گردید."
+            callback_query.message.chat.id,
+            callback_query.message.id,
+            "📸 *ارسال اسکرین‌شات الزامی است*\n\n"
+            "برای تکمیل گزارش، یک عکس یا اسکرین‌شات واضح از تخلف ارسال کنید.\n"
+            "گزارش بدون عکس ثبت و برای ادمین ارسال نمی‌شود.\n\n"
+            "برای انصراف، «لغو» را بفرستید.",
         )
     except Exception:
         pass
+    await client.send_message(
+        callback_query.message.chat.id,
+        "👇 حالا اسکرین‌شات تخلف را ارسال کنید.",
+        reply_markup=kb.kb_cancel_only(),
+    )
+
+
+@bot.on_message(state_is("report_wait_screenshot") & private)
+async def msg_report_screenshot(client, message):
+    user = await get_event_user(message)
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+
+    if text in ("لغو", "بازگشت 🔙"):
+        user["state"] = None
+        user["tmp_report_pid"] = None
+        user["tmp_report_reason"] = None
+        await db.save_user(chat_id, user)
+        await client.send_message(
+            chat_id, "✅ ارسال گزارش لغو شد.", reply_markup=kb.kb_main_menu(), reply_to_message_id=message.id
+        )
+        return
+
+    if not message.photo:
+        await client.send_message(
+            chat_id,
+            "⚠️ گزارش فقط با ارسال *عکس یا اسکرین‌شات* ثبت می‌شود. لطفاً تصویر را ارسال کنید.",
+            reply_markup=kb.kb_cancel_only(),
+            reply_to_message_id=message.id,
+        )
+        return
+
+    pid = str(user.get("tmp_report_pid") or "").strip()
+    reason_code = str(user.get("tmp_report_reason") or "").strip()
+    target_uid, target_user = await db.get_user_by_public_id(pid)
+    if not target_user or not reason_code:
+        user["state"] = None
+        user["tmp_report_pid"] = None
+        user["tmp_report_reason"] = None
+        await db.save_user(chat_id, user)
+        await client.send_message(
+            chat_id, "⚠️ اطلاعات گزارش منقضی شده؛ دوباره از پروفایل کاربر گزارش را شروع کنید.",
+            reply_markup=kb.kb_main_menu(), reply_to_message_id=message.id,
+        )
+        return
+
+    try:
+        await modlog.log_report(
+            client, str(message.author.id), user, target_uid, target_user, reason_code, message
+        )
+    except Exception as exc:
+        print(f"report moderation log failed: {exc}")
+        await client.send_message(
+            chat_id,
+            "❌ ارسال گزارش به گروه مدیریت ناموفق بود. دوباره همین اسکرین‌شات را ارسال کنید.",
+            reply_markup=kb.kb_cancel_only(), reply_to_message_id=message.id,
+        )
+        return
+
+    user["state"] = None
+    user["tmp_report_pid"] = None
+    user["tmp_report_reason"] = None
+    await db.save_user(chat_id, user)
+    await client.send_message(
+        chat_id,
+        "✅ گزارش همراه اسکرین‌شات ثبت شد و برای بررسی ادمین ارسال گردید.",
+        reply_markup=kb.kb_main_menu(), reply_to_message_id=message.id,
+    )
 
 
 # ---------------------------------------------------------------------------

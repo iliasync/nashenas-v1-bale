@@ -226,7 +226,7 @@ def ikb_my_profile_buttons():
     )
 
 
-def ikb_user_profile_actions(viewer_user: dict, target_user: dict, is_blocked: bool):
+def ikb_user_profile_actions(viewer_user: dict, target_user: dict, is_blocked: bool, is_admin=False, target_uid=None):
     pid = target_user.get("public_id")
     likes_cnt = int(target_user.get("likes", 0) or 0)
     my_likes = {str(x).strip() for x in (viewer_user.get("my_likes") or [])}
@@ -253,6 +253,10 @@ def ikb_user_profile_actions(viewer_user: dict, target_user: dict, is_blocked: b
         rows = [[btn_like], [btn_direct, btn_chat], [btn_block, btn_add_contact], [btn_report], [btn_export]]
         if in_chat:
             rows.append([btn_notify_end])
+
+    if is_admin and target_uid:
+        ban_label = "⛔ کاربر از ربات بن شده" if target_user.get("bot_banned") else "⛔ بن کاربر از ربات"
+        rows.append([(ban_label, f"log_ban:{target_uid}")])
 
     rows.append([("بازگشت", "back_to_main_from_user")])
     return ikb(*rows)

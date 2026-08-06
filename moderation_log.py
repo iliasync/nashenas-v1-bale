@@ -58,14 +58,24 @@ async def log_media(client, message, sender_uid, sender, receiver_uid, receiver)
         return False
 
 
-async def log_report(client, reporter_uid, reporter, target_uid, target, reason_code):
+async def log_report(client, reporter_uid, reporter, target_uid, target, reason_code, screenshot_message):
+    if not getattr(screenshot_message, "photo", None):
+        raise ValueError("A screenshot photo is required for reports")
+    copied = await client.copy_message(
+        int(config.LOG_CHAT_ID), screenshot_message.chat.id, screenshot_message.id
+    )
     lines = ["🚫 *گزارش جدید*", ""]
     lines += _user_lines("👤 *گزارش‌دهنده*", reporter_uid, reporter)
     lines += [""] + _user_lines("🎯 *کاربر گزارش‌شده*", target_uid, target)
-    lines += ["", f"🧾 دلیل گزارش: *{_reason_title(reason_code)}*", f"🔖 کد دلیل: `{reason_code}`"]
+    lines += [
+        "", f"🧾 دلیل گزارش: *{_reason_title(reason_code)}*", f"🔖 کد دلیل: `{reason_code}`",
+        f"📝 توضیح همراه اسکرین‌شات: {screenshot_message.caption or 'بدون توضیح'}",
+    ]
     await client.send_message(
         int(config.LOG_CHAT_ID), "\n".join(lines),
         reply_markup=kb.ikb_log_moderation(
             target_uid, reporter_uid, "⛔ بن کاربر گزارش‌شده", "⛔ بن گزارش‌دهنده"
         ),
+        reply_to_message_id=getattr(copied, "id", None),
     )
+    return True

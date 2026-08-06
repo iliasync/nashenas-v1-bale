@@ -185,6 +185,7 @@ def _default_user() -> dict:
         "pending_ref_pid": None, "pending_anon_token": None,
         "pending_dooz_host": None, "pending_rps_host": None,
         "tmp_direct_pid": None, "tmp_contact_pid": None, "nearby_root_msg_id": None,
+        "tmp_report_pid": None, "tmp_report_reason": None,
     }
 
 

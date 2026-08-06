@@ -127,13 +127,17 @@ async def show_user_profile_by_pid(client, viewer_chat_id, viewer_user: dict, pi
         await show_my_profile(client, viewer_chat_id, viewer_user, reply_to_message_id=reply_to_message_id)
         return
 
+    viewer_uid = (viewer_user or {}).get("user_id") or viewer_chat_id
+    viewer_is_admin = str(viewer_uid) == str(config.ADMIN_ID)
     caption = build_user_profile_text(
         viewer_user,
         target_user,
         target_uid=target_uid,
-        show_numeric_id=str(viewer_chat_id) == str(config.ADMIN_ID),
+        show_numeric_id=viewer_is_admin,
     )
     blocked = is_blocked_between(viewer_user, target_user)
-    actions = kb.ikb_user_profile_actions(viewer_user, target_user, blocked)
+    actions = kb.ikb_user_profile_actions(
+        viewer_user, target_user, blocked, is_admin=viewer_is_admin, target_uid=target_uid
+    )
     file_id = (target_user.get("profile_photo_file_id") or "").strip() or None
     await _send_profile_card(client, viewer_chat_id, file_id, caption, actions, reply_to_message_id)
