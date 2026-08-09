@@ -30,6 +30,7 @@ MAIN_MENU_TEXTS = {
     "📍افراد نزدیک",
     "👤پروفایل",
     "💰سکه بات",
+    "🎁 سکه روزانه",
     "🤔راهنما",
     "🚸 معرفی به دوستان (سکه رایگان)",
     "لینک ناشناس من 📬",
@@ -39,7 +40,7 @@ ALLOWED_MAIN_COMMANDS = {
     "/start", "/help", "/ghavanin", "/help_chat", "/help_credit", "/help_gps",
     "/help_profile", "/help_sendchat", "/help_direct", "/help_shortcuts",
     "/help_onw", "/help_chw", "/help_contacts", "/help_search",
-    "/help_deleteMessage", "/profile", "/credit", "/link", "/contacts",
+    "/help_deleteMessage", "/profile", "/credit", "/link", "/contacts", "/daily",
 }
 
 

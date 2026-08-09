@@ -5,7 +5,7 @@
 """
 import os
 
-BUILD_MARKER = "2026.08.06-admin-profile-v3"
+BUILD_MARKER = "2026.08.10-daily-coin-v1"
 
 # ---------------------------------------------------------------------------
 # Bale Bot
@@ -37,6 +37,8 @@ INVITE_JOIN_REWARD_NEW = 30      # پاداش نفر تازه‌وارد با ل
 INVITE_JOIN_REWARD_OWNER = 20    # پاداش صاحب لینک دعوت
 PROFILE_COMPLETE_REWARD = 5
 GPS_FIRST_TIME_REWARD = 5
+DAILY_COIN_DEFAULT_MIN = 2
+DAILY_COIN_DEFAULT_MAX = 15
 DIRECT_MESSAGE_COST = 1
 CHAT_REQUEST_COST = 2
 NEAR_SEARCH_COST = 5

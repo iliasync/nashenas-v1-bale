@@ -14,7 +14,10 @@
   و با ری‌استارت شدن ربات منطقاً باید از نو شروع شوند، در حافظه (RAM) نگه داشته می‌شوند
   (داخل ماژول‌های handlers/matchmaking.py، handlers/dooz.py، handlers/rps.py) نه در DB.
 """
+import asyncio
 import json
+import secrets
+from datetime import datetime, timedelta
 from typing import Optional
 
 import aiosqlite
@@ -23,6 +26,7 @@ from config import DB_PATH
 from utils import now_ts, today_str, day_str_plus, safe_int, haversine_km, gen_public_id, gen_anon_code_12
 
 _db: Optional[aiosqlite.Connection] = None
+_daily_coin_lock = asyncio.Lock()
 
 # کلیدهایی که به صورت ستون مستقیم در جدول users ذخیره می‌شوند (بقیه در extra/JSON می‌روند)
 _COLUMN_KEYS = {
@@ -121,6 +125,22 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at INTEGER,
     reviewed_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS daily_coin_claims (
+    user_id TEXT NOT NULL,
+    claim_day TEXT NOT NULL,
+    reward INTEGER NOT NULL,
+    claimed_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, claim_day),
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_daily_coin_claims_day ON daily_coin_claims(claim_day);
 """
 
 
@@ -366,6 +386,120 @@ async def add_coins_to_all_users(amount: int, include_banned: bool = False) -> i
         cur = await db.execute("UPDATE users SET coins = coins + ? WHERE bot_banned = 0", (amount,))
     await db.commit()
     return max(0, cur.rowcount or 0)
+
+
+# ---------------------------------------------------------------------------
+# سکه روزانه / تنظیمات عمومی
+# ---------------------------------------------------------------------------
+async def get_daily_coin_settings() -> tuple[int, int]:
+    """کمینه و بیشینه‌ی ذخیره‌شده را با پیش‌فرض‌های امن برمی‌گرداند."""
+    import config
+
+    db = _conn()
+    cur = await db.execute(
+        "SELECT key, value FROM app_settings WHERE key IN ('daily_coin_min', 'daily_coin_max')"
+    )
+    values = {row["key"]: row["value"] for row in await cur.fetchall()}
+    minimum = max(1, safe_int(values.get("daily_coin_min"), config.DAILY_COIN_DEFAULT_MIN))
+    maximum = max(1, safe_int(values.get("daily_coin_max"), config.DAILY_COIN_DEFAULT_MAX))
+    if minimum > maximum:
+        minimum, maximum = config.DAILY_COIN_DEFAULT_MIN, config.DAILY_COIN_DEFAULT_MAX
+    return minimum, maximum
+
+
+async def set_daily_coin_settings(minimum: int, maximum: int):
+    minimum, maximum = safe_int(minimum, 0), safe_int(maximum, 0)
+    if minimum <= 0 or maximum < minimum:
+        raise ValueError("daily coin range is invalid")
+    db = _conn()
+    updated_at = now_ts()
+    await db.executemany(
+        "INSERT INTO app_settings(key, value, updated_at) VALUES(?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+        (
+            ("daily_coin_min", str(minimum), updated_at),
+            ("daily_coin_max", str(maximum), updated_at),
+        ),
+    )
+    await db.commit()
+
+
+async def _daily_coin_streak(uid: str, claim_day: str) -> int:
+    cur = await _conn().execute(
+        "SELECT claim_day FROM daily_coin_claims WHERE user_id=? AND claim_day<=? "
+        "ORDER BY claim_day DESC LIMIT 366",
+        (str(uid), claim_day),
+    )
+    claimed_days = {row["claim_day"] for row in await cur.fetchall()}
+    try:
+        cursor_day = datetime.strptime(claim_day, "%Y-%m-%d").date()
+    except ValueError:
+        return 0
+    streak = 0
+    while cursor_day.strftime("%Y-%m-%d") in claimed_days:
+        streak += 1
+        cursor_day -= timedelta(days=1)
+    return streak
+
+
+async def claim_daily_coin(uid, claim_day: Optional[str] = None) -> dict:
+    """جایزه‌ی روز را دقیقاً یک‌بار ثبت و به موجودی اضافه می‌کند."""
+    uid = str(uid)
+    claim_day = claim_day or today_str()
+    async with _daily_coin_lock:
+        db = _conn()
+        minimum, maximum = await get_daily_coin_settings()
+
+        cur = await db.execute(
+            "SELECT reward FROM daily_coin_claims WHERE user_id=? AND claim_day=?",
+            (uid, claim_day),
+        )
+        existing = await cur.fetchone()
+        if existing:
+            balance_row = await (await db.execute("SELECT coins FROM users WHERE user_id=?", (uid,))).fetchone()
+            return {
+                "claimed": False, "reward": existing["reward"],
+                "balance": balance_row["coins"] if balance_row else 0,
+                "streak": await _daily_coin_streak(uid, claim_day),
+                "minimum": minimum, "maximum": maximum,
+            }
+
+        # secrets برای تصادفی‌بودن غیرقابل‌پیش‌بینی‌تر از random مناسب‌تر است.
+        reward = minimum + secrets.randbelow(maximum - minimum + 1)
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO daily_coin_claims(user_id, claim_day, reward, claimed_at) VALUES(?, ?, ?, ?)",
+            (uid, claim_day, reward, now_ts()),
+        )
+        claimed = (cur.rowcount or 0) > 0
+        if claimed:
+            await db.execute("UPDATE users SET coins=coins+? WHERE user_id=?", (reward, uid))
+            await db.commit()
+        else:
+            # INSERT OR IGNORE هم می‌تواند تراکنش ضمنی باز کند؛ آن را آزاد می‌کنیم.
+            await db.commit()
+            row = await (await db.execute(
+                "SELECT reward FROM daily_coin_claims WHERE user_id=? AND claim_day=?", (uid, claim_day)
+            )).fetchone()
+            reward = row["reward"] if row else 0
+
+        balance_row = await (await db.execute("SELECT coins FROM users WHERE user_id=?", (uid,))).fetchone()
+        return {
+            "claimed": claimed, "reward": reward,
+            "balance": balance_row["coins"] if balance_row else 0,
+            "streak": await _daily_coin_streak(uid, claim_day),
+            "minimum": minimum, "maximum": maximum,
+        }
+
+
+async def get_daily_coin_stats(claim_day: Optional[str] = None) -> dict:
+    claim_day = claim_day or today_str()
+    cur = await _conn().execute(
+        "SELECT COUNT(*) AS claim_count, COALESCE(SUM(reward), 0) AS reward_sum "
+        "FROM daily_coin_claims WHERE claim_day=?",
+        (claim_day,),
+    )
+    row = await cur.fetchone()
+    return {"claim_count": row["claim_count"] if row else 0, "reward_sum": row["reward_sum"] if row else 0}
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 """پنل مدیریت ربات (فقط برای ADMIN_ID)."""
 import asyncio
+import re
 
 from balethon.conditions import equals, regex, private
 
@@ -103,6 +104,23 @@ async def msg_admin_global_coin_btn(client, message):
     await client.send_message(message.chat.id, "🪙 تعداد سکه همگانی را بفرست:", reply_to_message_id=message.id)
 
 
+@bot.on_message(equals("⚙️ تنظیم سکه روزانه") & admin_only & private)
+async def msg_admin_daily_coin_btn(client, message):
+    user = await get_event_user(message)
+    minimum, maximum = await db.get_daily_coin_settings()
+    stats = await db.get_daily_coin_stats()
+    user["admin_state"] = "panel_daily_coin_waiting_range"
+    await db.save_user(message.chat.id, user)
+    await client.send_message(
+        message.chat.id,
+        "🎁 *تنظیم سکه روزانه*\n\n"
+        f"بازه فعلی: از *{minimum}* تا *{maximum}* سکه\n"
+        f"دریافت امروز: *{stats['claim_count']}* نفر | مجموع *{stats['reward_sum']}* سکه\n\n"
+        "کمینه و بیشینه را در یک پیام بفرست؛ مثال: `5 25`",
+        reply_to_message_id=message.id,
+    )
+
+
 @bot.on_message(equals("📌 جوین اجباری") & admin_only & private)
 async def msg_admin_force_join_btn(client, message):
     user = await get_event_user(message)
@@ -171,6 +189,34 @@ async def msg_admin_payments_btn(client, message):
 # ---------------------------------------------------------------------------
 # جریان‌های متنیِ پنل (admin_state)
 # ---------------------------------------------------------------------------
+@bot.on_message(admin_state_is("panel_daily_coin_waiting_range") & private)
+async def msg_admin_daily_coin_range(client, message):
+    user = await get_event_user(message)
+    parts = [part for part in re.split(r"[\s,،\-]+", (message.text or "").strip()) if part]
+    if len(parts) != 2:
+        await client.send_message(message.chat.id, "⚠️ دقیقاً دو عدد بفرست؛ مثال: `5 25`", reply_to_message_id=message.id)
+        return
+    minimum, maximum = safe_int(parts[0], -1), safe_int(parts[1], -1)
+    if minimum <= 0 or maximum < minimum:
+        await client.send_message(
+            message.chat.id,
+            "⚠️ کمینه باید مثبت و بیشینه باید بزرگ‌تر یا مساوی کمینه باشد.",
+            reply_to_message_id=message.id,
+        )
+        return
+    if maximum > 1_000_000:
+        await client.send_message(message.chat.id, "⚠️ بیشینه نمی‌تواند بیشتر از ۱٬۰۰۰٬۰۰۰ باشد.", reply_to_message_id=message.id)
+        return
+    await db.set_daily_coin_settings(minimum, maximum)
+    user["admin_state"] = None
+    await db.save_user(message.chat.id, user)
+    await client.send_message(
+        message.chat.id,
+        f"✅ بازه سکه روزانه روی *{minimum}* تا *{maximum}* تنظیم شد.",
+        reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id,
+    )
+
+
 @bot.on_message(admin_state_is("panel_broadcast_waiting_text") & private)
 async def msg_admin_broadcast_text(client, message):
     user = await get_event_user(message)

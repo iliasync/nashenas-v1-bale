@@ -13,19 +13,20 @@ ContinueDispatching پرتاب کند). این دقیقاً معادل زنجی�
                       تقریباً هرچیزی غیر از «پیام دایرکت در حال نوشتن» وقتی
                       کاربر چت فعال دارد، رله می‌شود نه چیز دیگری.
     3) payments     → خریدِ سکه و رسید
-    4) registration → ثبت‌نام / start
-    5) gps          → ثبت GPS
-    6) profile      → پروفایل/ادیت/لایک/بلاک/مخاطبین/گزارش
-    7) search       → جستجو
-    8) nearby       → افراد نزدیک
-    9) matchmaking  → اتصال تصادفی/فیلتر/اطراف
-   10) invites      → دعوت/لینک ناشناس
-   11) dooz         → بازی دوز
-   12) rps          → سنگ‌کاغذقیچی
-   13) admin        → پنل مدیریت
-   14) misc         → راهنما/قوانین
-   15) export       → خروجی پروفایل (فقط callback؛ ترتیب بی‌اهمیت)
-   16) fallback     → فال‌بک «بازگشت 🔙» (باید همیشه آخر باشد)
+    4) daily_coin   → جایزه‌ی تصادفی روزانه
+    5) registration → ثبت‌نام / start
+    6) gps          → ثبت GPS
+    7) profile      → پروفایل/ادیت/لایک/بلاک/مخاطبین/گزارش
+    8) search       → جستجو
+    9) nearby       → افراد نزدیک
+   10) matchmaking  → اتصال تصادفی/فیلتر/اطراف
+   11) invites      → دعوت/لینک ناشناس
+   12) dooz         → بازی دوز
+   13) rps          → سنگ‌کاغذقیچی
+   14) admin        → پنل مدیریت
+   15) misc         → راهنما/قوانین
+   16) export       → خروجی پروفایل (فقط callback؛ ترتیب بی‌اهمیت)
+   17) fallback     → فال‌بک «بازگشت 🔙» (باید همیشه آخر باشد)
 
 نکته‌ی شناخته‌شده (ساده‌سازی نسبت به نسخه‌ی اصلی): در نسخه‌ی اصلی، عکسِ
 رسیدِ پرداخت حتی در میانه‌ی یک چتِ فعال هم پردازش می‌شد. در این بازنویسی،
@@ -36,6 +37,7 @@ ContinueDispatching پرتاب کند). این دقیقاً معادل زنجی�
 from . import gate
 from . import chat
 from . import payments
+from . import daily_coin
 from . import registration
 from . import gps
 from . import profile
@@ -53,6 +55,6 @@ from . import fallback
 
 __all__ = [
     "gate", "chat", "payments", "registration", "gps", "profile", "search", "nearby",
-    "matchmaking", "invites", "dooz", "rps", "chat_cleanup", "admin", "misc", "export", "fallback",
+    "daily_coin", "matchmaking", "invites", "dooz", "rps", "chat_cleanup", "admin", "misc", "export", "fallback",
 ]
 
