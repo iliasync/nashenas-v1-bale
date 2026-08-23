@@ -5,8 +5,22 @@ SOURCE_REPO_DIR="/home/jowkdwuy/repositories/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 MAIN_FILE="$APP_DIR/main.py"
 PID_FILE="$APP_DIR/bot.pid"
-# خروجی دائمیِ بات روی هاست ذخیره نمی‌شود تا دیسک پر نشود.
-LOG_FILE="/dev/null"
+# cPanel ممکن است redirection به /dev/null را محدود کند؛ لاگ محلیِ چرخشی
+# استفاده می‌کنیم تا هم قابل‌نوشتن باشد و هم هیچ‌وقت بزرگ نشود.
+LOG_FILE="${BOT_LOG_FILE:-$APP_DIR/bot.log}"
+MAX_LOG_BYTES=1048576
+if ! (touch "$LOG_FILE" 2>/dev/null); then
+    LOG_FILE="$APP_DIR/.bot-runtime.log"
+    touch "$LOG_FILE" 2>/dev/null || exit 1
+fi
+
+if [ -f "$LOG_FILE" ]; then
+    LOG_SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "$LOG_SIZE" -ge "$MAX_LOG_BYTES" ]; then
+        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || :
+        : > "$LOG_FILE" 2>/dev/null || true
+    fi
+fi
 
 cd "$APP_DIR" || exit 1
 

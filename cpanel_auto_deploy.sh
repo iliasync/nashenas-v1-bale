@@ -6,8 +6,21 @@ APP_DIR="/home/jowkdwuy/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 DEPLOYED_FILE="$APP_DIR/.deployed_sha"
 LOCK_FILE="$APP_DIR/auto_deploy.lock"
-# لاگ‌های deploy هم روی دیسک انباشته نمی‌شوند.
-LOG_FILE="/dev/null"
+# لاگ deploy روی فایل محلیِ چرخشی نگه‌داری می‌شود تا با محدودیت cPanel
+# برای /dev/null مواجه نشویم و دیسک هم پر نشود.
+LOG_FILE="${DEPLOY_LOG_FILE:-$APP_DIR/auto_deploy.log}"
+MAX_LOG_BYTES=1048576
+if ! (touch "$LOG_FILE" 2>/dev/null); then
+    LOG_FILE="$APP_DIR/.deploy-runtime.log"
+    touch "$LOG_FILE" 2>/dev/null || exit 1
+fi
+if [ -f "$LOG_FILE" ]; then
+    LOG_SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "$LOG_SIZE" -ge "$MAX_LOG_BYTES" ]; then
+        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || :
+        : > "$LOG_FILE" 2>/dev/null || true
+    fi
+fi
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "$LOG_FILE"
