@@ -81,7 +81,7 @@ async def _broadcast_worker(client):
                 text = payload.get("text", "")
             ok = await _send_bulk_message(client, uid, text, retries=3)
             await db.update_broadcast_job(next_index=i + 1, sent=job.get("sent", 0) + int(ok), failed=job.get("failed", 0) + int(not ok))
-            await asyncio.sleep(0.08 if ok else 0.2)
+            await asyncio.sleep(config.BROADCAST_DELAY_SECONDS if ok else config.BROADCAST_RETRY_DELAY_SECONDS)
 
 
 def start_broadcast_worker(client):
@@ -121,6 +121,34 @@ async def cmd_panel(client, message):
         f"🆔 آیدی ادمین تشخیص‌داده‌شده: `{message.author.id}`",
         reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id,
     )
+
+
+@bot.on_command(name="testlog", min_arguments=0, max_arguments=0, condition=private)
+async def cmd_test_log_group(client, message):
+    """تست مستقیم مقصد لاگ و نمایش خطای واقعی فقط به ادمین."""
+    if not is_admin_id(message.author.id):
+        return
+    target = str(config.LOG_CHAT_ID or "").strip()
+    if not target:
+        await client.send_message(message.chat.id, "❌ `LOG_CHAT_ID` تنظیم نشده است.", reply_to_message_id=message.id)
+        return
+    try:
+        sent = await asyncio.wait_for(
+            client.send_message(int(target), "✅ تست گروه لاگ بات با موفقیت انجام شد."), timeout=20
+        )
+        destination = "پیوی ادمین" if target == str(config.ADMIN_ID) else "گروه لاگ"
+        await client.send_message(
+            message.chat.id,
+            f"✅ ارسال تست موفق بود.\nمقصد فعلی: *{destination}* (`{target}`)\nmessage_id: `{getattr(sent, 'id', '—')}`",
+            reply_to_message_id=message.id,
+        )
+    except Exception as exc:
+        await client.send_message(
+            message.chat.id,
+            f"❌ ارسال به مقصد لاگ ناموفق بود.\nمقصد: `{target}`\nخطا: `{type(exc).__name__}: {str(exc)[:300]}`\n\n"
+            "ربات باید داخل گروه باشد و اجازه ارسال پیام داشته باشد.",
+            reply_to_message_id=message.id,
+        )
 
 
 @bot.on_message(equals("🔙 خروج از پنل") & admin_only & private)

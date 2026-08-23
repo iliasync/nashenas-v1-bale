@@ -5,6 +5,13 @@
 """
 import os
 
+def _env_float(name, default, minimum=0.0, maximum=10.0):
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
 BUILD_MARKER = "2026.08.10-daily-coin-v1"
 
 # ---------------------------------------------------------------------------
@@ -43,6 +50,11 @@ DIRECT_MESSAGE_COST = 1
 CHAT_REQUEST_COST = 2
 NEAR_SEARCH_COST = 5
 NOTIFY_END_COST = 1
+
+# فاصله‌ی بین پیام‌های همگانی؛ مقدار کمتر سریع‌تر است اما احتمال rate-limit
+# سرویس را بیشتر می‌کند. از طریق BROADCAST_DELAY_SECONDS در .env قابل تنظیم است.
+BROADCAST_DELAY_SECONDS = _env_float("BROADCAST_DELAY_SECONDS", 0.035, 0.01, 2.0)
+BROADCAST_RETRY_DELAY_SECONDS = _env_float("BROADCAST_RETRY_DELAY_SECONDS", 0.15, 0.05, 5.0)
 
 DOOZ_RANDOM_ENTRY_COIN = 0
 DOOZ_RANDOM_WIN_REWARD_COIN = 0

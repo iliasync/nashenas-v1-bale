@@ -1,4 +1,5 @@
 """چت خصوصی: درخواست/پذیرش چت، پیام دایرکت، رله‌ی پیام داخل چت، هدیه‌ی سکه، قطع چت."""
+import asyncio
 from balethon.conditions import equals, regex,private
 from balethon.errors import ContinueDispatching
 
@@ -226,6 +227,31 @@ async def relay_message_to_partner(client, from_uid_str, message):
             await db.save_chat_message_link(from_uid_str, message.id, other_uid, target_id)
             await db.save_chat_message_link(other_uid, target_id, from_uid_str, message.id)
 
+    async def copy_to_partner():
+        # بعضی نسخه‌های قدیمی Balethon آرگومان reply را برای copy_message ندارند.
+        last_error = None
+        for attempt in range(3):
+            try:
+                if target_reply_id is None:
+                    return await asyncio.wait_for(
+                        client.copy_message(int(other_uid), message.chat.id, message.id), timeout=20
+                    )
+                try:
+                    return await asyncio.wait_for(
+                        client.copy_message(
+                            int(other_uid), message.chat.id, message.id, reply_to_message_id=target_reply_id
+                        ), timeout=20
+                    )
+                except TypeError:
+                    return await asyncio.wait_for(
+                        client.copy_message(int(other_uid), message.chat.id, message.id), timeout=20
+                    )
+            except Exception as exc:
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        raise last_error
+
     if message.text:
         try:
             sent = await client.send_message(int(other_uid), message.text, reply_markup=kb.kb_chat_menu(), reply_to_message_id=target_reply_id)
@@ -236,22 +262,28 @@ async def relay_message_to_partner(client, from_uid_str, message):
 
     if message.photo:
         try:
-            sent = await client.copy_message(int(other_uid), message.chat.id, message.id, reply_to_message_id=target_reply_id)
+            sent = await copy_to_partner()
             await remember(sent)
             await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
         except Exception:
-            pass
+            try:
+                await client.send_message(int(from_uid_str), "⚠️ ارسال رسانه ناموفق بود؛ لطفاً دوباره تلاش کن.")
+            except Exception:
+                pass
         return
 
     if modlog.is_loggable_media(message):
         try:
             # copyMessage رسانه را بدون نمایش هویت فرستنده منتقل می‌کند و همه‌ی
             # انواع فایل بله (ویدئو، ویس، صوت، سند، گیف، استیکر و مخاطب) را پوشش می‌دهد.
-            sent = await client.copy_message(int(other_uid), message.chat.id, message.id, reply_to_message_id=target_reply_id)
+            sent = await copy_to_partner()
             await remember(sent)
             await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
         except Exception:
-            pass
+            try:
+                await client.send_message(int(from_uid_str), "⚠️ ارسال رسانه ناموفق بود؛ لطفاً دوباره تلاش کن.")
+            except Exception:
+                pass
         return
 
     if message.location is not None:

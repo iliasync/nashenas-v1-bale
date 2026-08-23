@@ -1,4 +1,6 @@
 """ارسال لاگ رسانه و گزارش به گروه مدیریت."""
+import asyncio
+
 import config
 import keyboards as kb
 from utils import normalize_gender_text, safe_int
@@ -39,23 +41,39 @@ def is_loggable_media(message):
 
 async def log_media(client, message, sender_uid, sender, receiver_uid, receiver):
     """ابتدا خود رسانه و سپس کارت اطلاعات و دکمه‌های مدیریت را می‌فرستد."""
-    try:
-        copied = await client.copy_message(int(config.LOG_CHAT_ID), message.chat.id, message.id)
-        lines = [f"🖼 *لاگ رسانه جدید — {_media_type(message)}*", ""]
-        lines += _user_lines("👤 *ارسال‌کننده*", sender_uid, sender)
-        lines += [""] + _user_lines("🎯 *دریافت‌کننده*", receiver_uid, receiver)
-        lines += ["", f"📝 کپشن: {(message.caption or 'بدون کپشن')}"]
-        await client.send_message(
-            int(config.LOG_CHAT_ID), "\n".join(lines),
-            reply_markup=kb.ikb_log_moderation(
-                sender_uid, receiver_uid, "⛔ بن ارسال‌کننده", "⛔ بن دریافت‌کننده"
-            ),
-            reply_to_message_id=getattr(copied, "id", None),
-        )
-        return True
-    except Exception as exc:
-        print(f"media moderation log failed: {exc}")
-        return False
+    destinations = []
+    for raw_id in (config.LOG_CHAT_ID, config.ADMIN_ID):
+        try:
+            chat_id = int(str(raw_id).strip())
+        except (TypeError, ValueError):
+            continue
+        if chat_id and chat_id not in destinations:
+            destinations.append(chat_id)
+
+    lines = [f"🖼 *لاگ رسانه جدید — {_media_type(message)}*", ""]
+    lines += _user_lines("👤 *ارسال‌کننده*", sender_uid, sender)
+    lines += [""] + _user_lines("🎯 *دریافت‌کننده*", receiver_uid, receiver)
+    lines += ["", f"📝 کپشن: {(message.caption or 'بدون کپشن')}"]
+    last_error = None
+    for destination in destinations:
+        try:
+            copied = await asyncio.wait_for(
+                client.copy_message(destination, message.chat.id, message.id), timeout=20
+            )
+            await asyncio.wait_for(
+                client.send_message(
+                    destination, "\n".join(lines),
+                    reply_markup=kb.ikb_log_moderation(
+                        sender_uid, receiver_uid, "⛔ بن ارسال‌کننده", "⛔ بن دریافت‌کننده"
+                    ),
+                    reply_to_message_id=getattr(copied, "id", None),
+                ), timeout=20
+            )
+            return True
+        except Exception as exc:
+            last_error = exc
+    print(f"media moderation log failed: {type(last_error).__name__ if last_error else 'no destination'}")
+    return False
 
 
 async def log_report(client, reporter_uid, reporter, target_uid, target, reason_code, screenshot_message):
