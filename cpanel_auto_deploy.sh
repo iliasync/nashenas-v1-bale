@@ -6,7 +6,8 @@ APP_DIR="/home/jowkdwuy/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 DEPLOYED_FILE="$APP_DIR/.deployed_sha"
 LOCK_FILE="$APP_DIR/auto_deploy.lock"
-LOG_FILE="$APP_DIR/auto_deploy.log"
+# لاگ‌های deploy هم روی دیسک انباشته نمی‌شوند.
+LOG_FILE="/dev/null"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "$LOG_FILE"

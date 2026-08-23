@@ -12,6 +12,9 @@ from bot_instance import bot
 from filters import get_event_user, admin_only, admin_state_is, is_admin_id
 from utils import safe_int, normalize_gender_text, last_seen_text
 
+_broadcast_task = None
+_broadcast_lock = asyncio.Lock()
+
 
 @bot.on_callback_query(regex(r"^log_ban:"))
 async def cb_log_ban_user(client, callback_query):
@@ -47,13 +50,61 @@ async def cb_log_ban_user(client, callback_query):
 async def _send_bulk_message(client, uid, text, retries=2):
     for attempt in range(retries + 1):
         try:
-            await client.send_message(int(uid), text)
+            await asyncio.wait_for(client.send_message(int(uid), text), timeout=20)
             return True
         except Exception:
             if attempt >= retries:
                 return False
             await asyncio.sleep(0.4 * (attempt + 1))
     return False
+
+
+async def _broadcast_worker(client):
+    """ارسال قابل‌بازیابی؛ هر گیرنده قبل از ارسال در SQLite checkpoint می‌شود."""
+    global _broadcast_task
+    async with _broadcast_lock:
+        while True:
+            job = await db.get_broadcast_job()
+            if not job or job.get("status") in ("paused", "completed"): return
+            recipients = job.get("recipients") or []
+            i = safe_int(job.get("next_index"), 0)
+            if i >= len(recipients):
+                await db.update_broadcast_job(status="completed")
+                return
+            uid = recipients[i]
+            payload = job.get("payload") or {}
+            if job.get("kind") == "coin":
+                tu = await db.get_user(uid, create_if_missing=False)
+                amount = safe_int(payload.get("amount"), 0)
+                text = f"🎁 *سکه همگانی!*\n\n✅ به شما *{amount}* 🪙 سکه هدیه داده شد.\n💰 موجودی جدید شما: *{safe_int((tu or {}).get('coins'), 0)}* 🪙"
+            else:
+                text = payload.get("text", "")
+            ok = await _send_bulk_message(client, uid, text, retries=3)
+            await db.update_broadcast_job(next_index=i + 1, sent=job.get("sent", 0) + int(ok), failed=job.get("failed", 0) + int(not ok))
+            await asyncio.sleep(0.08 if ok else 0.2)
+
+
+def start_broadcast_worker(client):
+    global _broadcast_task
+    if _broadcast_task is None or _broadcast_task.done():
+        _broadcast_task = asyncio.create_task(_broadcast_worker(client))
+    return _broadcast_task
+
+
+async def stop_broadcast_worker():
+    global _broadcast_task
+    if _broadcast_task and not _broadcast_task.done():
+        _broadcast_task.cancel()
+        try:
+            await _broadcast_task
+        except asyncio.CancelledError:
+            pass
+    _broadcast_task = None
+
+
+async def resume_pending_broadcasts(client):
+    job = await db.get_broadcast_job()
+    if job and job.get("status") == "running": start_broadcast_worker(client)
 
 
 @bot.on_command(name="panel", min_arguments=0, max_arguments=0,condition=private)
@@ -86,6 +137,38 @@ async def msg_admin_broadcast_btn(client, message):
     user["admin_state"] = "panel_broadcast_waiting_text"
     await db.save_user(message.chat.id, user)
     await client.send_message(message.chat.id, "✉️ متن همگانی را ارسال کنید:", reply_to_message_id=message.id)
+
+
+@bot.on_message(equals("📊 وضعیت همگانی") & admin_only & private)
+async def msg_broadcast_status(client, message):
+    job = await db.get_broadcast_job()
+    if not job:
+        text = "ℹ️ همگانی فعالی وجود ندارد."
+    else:
+        total = len(job.get("recipients") or [])
+        text = (f"📊 وضعیت همگانی: *{job.get('status')}*\n"
+                f"پیشرفت: {job.get('next_index', 0)}/{total}\n"
+                f"✅ موفق: {job.get('sent', 0)} | ❌ ناموفق: {job.get('failed', 0)}")
+    await client.send_message(message.chat.id, text, reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id)
+
+
+@bot.on_message(equals("⏸ توقف همگانی") & admin_only & private)
+async def msg_broadcast_pause(client, message):
+    job = await db.get_broadcast_job()
+    if not job or job.get("status") != "running":
+        await client.send_message(message.chat.id, "ℹ️ همگانی در حال اجرا نیست.", reply_to_message_id=message.id); return
+    await db.update_broadcast_job(status="paused")
+    await client.send_message(message.chat.id, "⏸ همگانی متوقف شد؛ از همان نقطه قابل ادامه است.", reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id)
+
+
+@bot.on_message(equals("▶️ ادامه همگانی") & admin_only & private)
+async def msg_broadcast_resume(client, message):
+    job = await db.get_broadcast_job()
+    if not job:
+        await client.send_message(message.chat.id, "ℹ️ همگانی ذخیره‌شده‌ای وجود ندارد.", reply_to_message_id=message.id); return
+    await db.update_broadcast_job(status="running")
+    start_broadcast_worker(client)
+    await client.send_message(message.chat.id, "▶️ ادامه‌ی همگانی شروع شد.", reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id)
 
 
 @bot.on_message(equals("🪙 انتقال سکه") & admin_only & private)
@@ -223,20 +306,13 @@ async def msg_admin_broadcast_text(client, message):
     if not (message.text or "").strip():
         await client.send_message(message.chat.id, "⚠️ متن نامعتبره. دوباره بفرست.", reply_to_message_id=message.id)
         return
-    broadcast_text = message.text
-    sent, failed = 0, 0
-    for uid, banned in await db.iter_all_user_ids():
-        if banned:
-            continue
-        if await _send_bulk_message(client, uid, broadcast_text):
-            sent += 1
-        else:
-            failed += 1
-        await asyncio.sleep(0.05)
+    recipients = [uid for uid, banned in await db.iter_all_user_ids() if not banned]
+    await db.create_broadcast_job({"text": message.text}, recipients, message.chat.id)
+    start_broadcast_worker(client)
     user["admin_state"] = None
     await db.save_user(message.chat.id, user)
     await client.send_message(
-        message.chat.id, f"✅ ارسال همگانی انجام شد.\n\n📨 ارسال موفق: {sent}\n❌ ناموفق: {failed}",
+        message.chat.id, f"✅ همگانی شروع شد.\n\n👥 گیرنده: {len(recipients)}\n📊 از «وضعیت همگانی» پیگیری یا متوقفش کنید.",
         reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id,
     )
 
@@ -295,26 +371,15 @@ async def msg_admin_global_coin_amount(client, message):
     if amount <= 0:
         await client.send_message(message.chat.id, "⚠️ تعداد سکه باید عدد صحیح مثبت باشد.", reply_to_message_id=message.id)
         return
-    credited = await db.add_coins_to_all_users(amount, include_banned=False)
-    sent, failed = 0, 0
-    for uid, banned in await db.iter_all_user_ids():
-        if banned:
-            continue
-        tu = await db.get_user(uid, create_if_missing=False)
-        if not tu:
-            continue
-        text = f"🎁 *سکه همگانی!*\n\n✅ به شما *{amount}* 🪙 سکه هدیه داده شد.\n💰 موجودی جدید شما: *{tu['coins']}* 🪙"
-        if await _send_bulk_message(client, uid, text):
-            sent += 1
-        else:
-            failed += 1
-        await asyncio.sleep(0.05)
+    recipients = [uid for uid, banned in await db.iter_all_user_ids() if not banned]
+    credited = await db.create_coin_broadcast_job(amount, recipients, message.chat.id)
+    start_broadcast_worker(client)
     fresh_user = await db.get_user(message.chat.id)
     fresh_user["admin_state"] = None
     await db.save_user(message.chat.id, fresh_user)
     await client.send_message(
         message.chat.id,
-        f"✅ سکه همگانی انجام شد.\n\n🪙 مقدار: {amount}\n👥 افزایش موجودی موفق: {credited}\n📨 ارسال پیام تبریک موفق: {sent}\n❌ ناموفق: {failed}",
+        f"✅ سکه همگانی شروع شد.\n\n🪙 مقدار: {amount}\n👥 افزایش موجودی: {credited}\n📊 ارسال پیام از وضعیت همگانی قابل پیگیری است.",
         reply_markup=kb.kb_admin_panel(), reply_to_message_id=message.id,
     )
 

@@ -215,16 +215,29 @@ async def relay_message_to_partner(client, from_uid_str, message):
         await end_chat_for(other_uid)
         return
 
+    # پیام ریپلای‌شده در این چت به پیام متناظرِ طرف مقابل نگاشت می‌شود.
+    reply_to = getattr(getattr(message, "reply_to_message", None), "id", None)
+    link = await db.get_chat_message_link(from_uid_str, reply_to) if reply_to else None
+    target_reply_id = link[1] if link and str(link[0]) == str(other_uid) else None
+
+    async def remember(sent_message):
+        target_id = getattr(sent_message, "id", None)
+        if target_id is not None:
+            await db.save_chat_message_link(from_uid_str, message.id, other_uid, target_id)
+            await db.save_chat_message_link(other_uid, target_id, from_uid_str, message.id)
+
     if message.text:
         try:
-            await client.send_message(int(other_uid), message.text,reply_markup=kb.kb_chat_menu())
+            sent = await client.send_message(int(other_uid), message.text, reply_markup=kb.kb_chat_menu(), reply_to_message_id=target_reply_id)
+            await remember(sent)
         except Exception:
             pass
         return
 
     if message.photo:
         try:
-            await client.copy_message(int(other_uid), message.chat.id, message.id)
+            sent = await client.copy_message(int(other_uid), message.chat.id, message.id, reply_to_message_id=target_reply_id)
+            await remember(sent)
             await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
         except Exception:
             pass
@@ -234,7 +247,8 @@ async def relay_message_to_partner(client, from_uid_str, message):
         try:
             # copyMessage رسانه را بدون نمایش هویت فرستنده منتقل می‌کند و همه‌ی
             # انواع فایل بله (ویدئو، ویس، صوت، سند، گیف، استیکر و مخاطب) را پوشش می‌دهد.
-            await client.copy_message(int(other_uid), message.chat.id, message.id)
+            sent = await client.copy_message(int(other_uid), message.chat.id, message.id, reply_to_message_id=target_reply_id)
+            await remember(sent)
             await modlog.log_media(client, message, from_uid_str, fu, other_uid, ou)
         except Exception:
             pass

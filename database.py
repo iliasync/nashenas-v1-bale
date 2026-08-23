@@ -141,6 +141,29 @@ CREATE TABLE IF NOT EXISTS daily_coin_claims (
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_daily_coin_claims_day ON daily_coin_claims(claim_day);
+
+CREATE TABLE IF NOT EXISTS broadcast_jobs (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    kind TEXT NOT NULL DEFAULT 'text',
+    payload TEXT NOT NULL,
+    recipients TEXT NOT NULL DEFAULT '[]',
+    next_index INTEGER NOT NULL DEFAULT 0,
+    sent INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'running',
+    admin_uid TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_message_links (
+    source_chat TEXT NOT NULL,
+    source_message INTEGER NOT NULL,
+    target_chat TEXT NOT NULL,
+    target_message INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (source_chat, source_message)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_links_target ON chat_message_links(target_chat, target_message);
 """
 
 
@@ -372,6 +395,61 @@ async def iter_all_user_ids():
     cur = await db.execute("SELECT user_id, bot_banned FROM users")
     rows = await cur.fetchall()
     return [(r["user_id"], bool(r["bot_banned"])) for r in rows]
+
+
+async def create_broadcast_job(payload: dict, recipients, admin_uid, kind="text"):
+    db = _conn()
+    await db.execute("INSERT OR REPLACE INTO broadcast_jobs(id,kind,payload,recipients,next_index,sent,failed,status,admin_uid,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?)",
+                     (kind, json.dumps(payload, ensure_ascii=False), json.dumps([str(x) for x in recipients]), 0, 0, 0, "running", str(admin_uid), now_ts()))
+    await db.commit()
+
+
+async def create_coin_broadcast_job(amount: int, recipients, admin_uid):
+    """افزایش موجودی و ثبت صف اعلان سکه را در یک تراکنش انجام می‌دهد."""
+    db = _conn()
+    amount = safe_int(amount, 0)
+    await db.execute("UPDATE users SET coins = coins + ? WHERE bot_banned = 0", (amount,))
+    cur = await db.execute("SELECT changes() AS c")
+    credited = int((await cur.fetchone())["c"])
+    await db.execute("INSERT OR REPLACE INTO broadcast_jobs(id,kind,payload,recipients,next_index,sent,failed,status,admin_uid,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?)",
+                     ("coin", json.dumps({"amount": amount}), json.dumps([str(x) for x in recipients]), 0, 0, 0, "running", str(admin_uid), now_ts()))
+    await db.commit()
+    return credited
+
+
+async def get_broadcast_job():
+    row = await (await _conn().execute("SELECT * FROM broadcast_jobs WHERE id=1")).fetchone()
+    if not row:
+        return None
+    job = dict(row)
+    for key in ("payload", "recipients"):
+        try: job[key] = json.loads(job[key] or ("{}" if key == "payload" else "[]"))
+        except Exception: job[key] = {} if key == "payload" else []
+    return job
+
+
+async def update_broadcast_job(**fields):
+    if not fields: return
+    fields["updated_at"] = now_ts()
+    db = _conn()
+    await db.execute("UPDATE broadcast_jobs SET " + ",".join(f"{k}=?" for k in fields) + " WHERE id=1", tuple(fields.values()))
+    await db.commit()
+
+
+async def clear_broadcast_job():
+    await _conn().execute("DELETE FROM broadcast_jobs WHERE id=1")
+    await _conn().commit()
+
+
+async def save_chat_message_link(source_chat, source_message, target_chat, target_message):
+    await _conn().execute("INSERT OR REPLACE INTO chat_message_links VALUES(?,?,?,?,?)",
+                          (str(source_chat), int(source_message), str(target_chat), int(target_message), now_ts()))
+    await _conn().commit()
+
+
+async def get_chat_message_link(source_chat, source_message):
+    row = await (await _conn().execute("SELECT target_chat,target_message FROM chat_message_links WHERE source_chat=? AND source_message=?", (str(source_chat), int(source_message)))).fetchone()
+    return (row["target_chat"], row["target_message"]) if row else None
 
 
 async def add_coins_to_all_users(amount: int, include_banned: bool = False) -> int:

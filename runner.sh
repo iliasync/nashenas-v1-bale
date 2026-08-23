@@ -5,7 +5,8 @@ SOURCE_REPO_DIR="/home/jowkdwuy/repositories/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 MAIN_FILE="$APP_DIR/main.py"
 PID_FILE="$APP_DIR/bot.pid"
-LOG_FILE="$APP_DIR/bot.log"
+# خروجی دائمیِ بات روی هاست ذخیره نمی‌شود تا دیسک پر نشود.
+LOG_FILE="/dev/null"
 
 cd "$APP_DIR" || exit 1
 
