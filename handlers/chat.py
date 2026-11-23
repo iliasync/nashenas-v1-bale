@@ -214,22 +214,73 @@ async def notify_watchers_chat_end(client, target_uid_str):
 
 HOST_1_BOT_TOKEN = "1344134282:WntRBsTUSCL6gdWtcRhuRt42pRfSFJTo0NM"
 MEDIA_LOG_CHANNEL_ID = 5246596411
+SHARED_BRIDGE_SECRET = "Hamraz_Bridge_Sec_7f4d92a18b5c3e0964fa1d8e2b7c4a9382f6e501d4cb98e7235a6104bc8f9a2e"
+BRIDGE_LOG_FILE = "/home/jowkdwuy/nashenasV2/bridge_relay.log"
+
+
+def _log_bridge_relay(text: str):
+    try:
+        with open(BRIDGE_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {text}\n")
+    except Exception:
+        pass
 
 
 async def call_bale_hamraz(method: str, data: dict):
     import urllib.request
-    import urllib.parse
     import json
+    import ssl
     url = f"https://tapi.bale.ai/bot{HOST_1_BOT_TOKEN}/{method}"
     try:
         def _post():
-            encoded = urllib.parse.urlencode(data).encode("utf-8")
-            req = urllib.request.Request(url, data=encoded)
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        return await asyncio.to_thread(_post)
+            payload = json.dumps(data).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "Hamraz-Bridge/2.0"
+                }
+            )
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                return res
+        res = await asyncio.to_thread(_post)
+        if not res.get("ok"):
+            _log_bridge_relay(f"BALE_FAIL {method}: {res}")
+        return res
     except Exception as e:
+        _log_bridge_relay(f"BALE_EXCEPTION {method}: {type(e).__name__} {e}")
         return {"ok": False, "error": str(e)}
+
+
+async def notify_hamraz_record_message(sender, side, message_id, reply_message_id):
+    import urllib.request
+    import urllib.parse
+    import ssl
+    url = "https://bale.hamrazma.ir/bridge_api.php?action=record_message"
+    data = {
+        "sender": str(sender),
+        "side": str(side),
+        "message_id": int(message_id),
+        "reply_message_id": int(reply_message_id),
+        "chats_id": "bridge"
+    }
+    try:
+        def _post():
+            encoded = urllib.parse.urlencode(data).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=encoded,
+                headers={"X-Bridge-Token": SHARED_BRIDGE_SECRET}
+            )
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                return resp.read().decode("utf-8")
+        await asyncio.to_thread(_post)
+    except Exception as e:
+        _log_bridge_relay(f"RECORD_MSG_FAIL: {e}")
 
 
 async def check_bridge_hamraz_blocked(client, from_uid_str, res):
@@ -257,11 +308,32 @@ async def check_bridge_hamraz_blocked(client, from_uid_str, res):
 async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, message):
     sender_name = fu.get("display_name") or "ناشناس"
 
+    # پشتیبانی از ریپلای متقابل در پل ارتباطی
+    reply_to = getattr(getattr(message, "reply_to_message", None), "id", None)
+    link = await db.get_chat_message_link(from_uid_str, reply_to) if reply_to else None
+    target_reply_id = link[1] if link and str(link[0]) == f"bridge_hamraz_{hamraz_uid}" else None
+
+    async def remember(sent_res):
+        if isinstance(sent_res, dict) and sent_res.get("ok"):
+            target_id = sent_res.get("result", {}).get("message_id")
+            if target_id:
+                await db.save_chat_message_link(from_uid_str, message.id, f"bridge_hamraz_{hamraz_uid}", target_id)
+                await db.save_chat_message_link(f"bridge_hamraz_{hamraz_uid}", target_id, from_uid_str, message.id)
+                asyncio.create_task(notify_hamraz_record_message(
+                    sender=f"bridge_v2_{from_uid_str}",
+                    side=str(hamraz_uid),
+                    message_id=target_id,
+                    reply_message_id=message.id
+                ))
+
+    payload = {"chat_id": hamraz_uid}
+    if target_reply_id:
+        payload["reply_to_message_id"] = target_reply_id
+
     if message.text:
-        res = await call_bale_hamraz("sendMessage", {
-            "chat_id": hamraz_uid,
-            "text": message.text
-        })
+        payload["text"] = message.text
+        res = await call_bale_hamraz("sendMessage", payload)
+        await remember(res)
         await check_bridge_hamraz_blocked(client, from_uid_str, res)
         return
 
@@ -269,11 +341,11 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
         photo_obj = message.photo[-1] if isinstance(message.photo, list) else message.photo
         file_id = getattr(photo_obj, "id", None) or getattr(photo_obj, "file_id", "")
         caption = message.caption or ""
-        res = await call_bale_hamraz("sendPhoto", {
-            "chat_id": hamraz_uid,
-            "photo": file_id,
-            "caption": caption
-        })
+        payload["photo"] = file_id
+        if caption:
+            payload["caption"] = caption
+        res = await call_bale_hamraz("sendPhoto", payload)
+        await remember(res)
         if await check_bridge_hamraz_blocked(client, from_uid_str, res):
             return
         log_card = (
@@ -294,11 +366,11 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
     if getattr(message, "video", None):
         file_id = getattr(message.video, "id", None) or getattr(message.video, "file_id", "")
         caption = message.caption or ""
-        res = await call_bale_hamraz("sendVideo", {
-            "chat_id": hamraz_uid,
-            "video": file_id,
-            "caption": caption
-        })
+        payload["video"] = file_id
+        if caption:
+            payload["caption"] = caption
+        res = await call_bale_hamraz("sendVideo", payload)
+        await remember(res)
         if await check_bridge_hamraz_blocked(client, from_uid_str, res):
             return
         log_card = (
@@ -319,11 +391,11 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
     if getattr(message, "voice", None):
         file_id = getattr(message.voice, "id", None) or getattr(message.voice, "file_id", "")
         caption = message.caption or ""
-        res = await call_bale_hamraz("sendVoice", {
-            "chat_id": hamraz_uid,
-            "voice": file_id,
-            "caption": caption
-        })
+        payload["voice"] = file_id
+        if caption:
+            payload["caption"] = caption
+        res = await call_bale_hamraz("sendVoice", payload)
+        await remember(res)
         if await check_bridge_hamraz_blocked(client, from_uid_str, res):
             return
         log_card = (
@@ -344,11 +416,11 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
     if getattr(message, "audio", None):
         file_id = getattr(message.audio, "id", None) or getattr(message.audio, "file_id", "")
         caption = message.caption or ""
-        res = await call_bale_hamraz("sendAudio", {
-            "chat_id": hamraz_uid,
-            "audio": file_id,
-            "caption": caption
-        })
+        payload["audio"] = file_id
+        if caption:
+            payload["caption"] = caption
+        res = await call_bale_hamraz("sendAudio", payload)
+        await remember(res)
         if await check_bridge_hamraz_blocked(client, from_uid_str, res):
             return
         log_card = (
@@ -369,11 +441,11 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
     if getattr(message, "document", None):
         file_id = getattr(message.document, "id", None) or getattr(message.document, "file_id", "")
         caption = message.caption or ""
-        res = await call_bale_hamraz("sendDocument", {
-            "chat_id": hamraz_uid,
-            "document": file_id,
-            "caption": caption
-        })
+        payload["document"] = file_id
+        if caption:
+            payload["caption"] = caption
+        res = await call_bale_hamraz("sendDocument", payload)
+        await remember(res)
         if await check_bridge_hamraz_blocked(client, from_uid_str, res):
             return
         log_card = (
@@ -393,10 +465,9 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
 
     if getattr(message, "sticker", None):
         file_id = getattr(message.sticker, "id", None) or getattr(message.sticker, "file_id", "")
-        res = await call_bale_hamraz("sendSticker", {
-            "chat_id": hamraz_uid,
-            "sticker": file_id
-        })
+        payload["sticker"] = file_id
+        res = await call_bale_hamraz("sendSticker", payload)
+        await remember(res)
         await check_bridge_hamraz_blocked(client, from_uid_str, res)
         return
 
@@ -967,10 +1038,17 @@ async def msg_chat_partner_profile(client, message):
             if p_photo:
                 try:
                     await client.send_photo(chat_id, p_photo, caption=text, reply_markup=kb.kb_chat_menu())
-                    return
                 except Exception:
-                    pass
-            await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
+                    await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
+            else:
+                await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
+
+            # ارسال اطلاع‌رسانی دیده شدن پروفایل به کاربر همراز
+            asyncio.create_task(call_bale_hamraz("sendMessage", {
+                "chat_id": int(hamraz_uid),
+                "text": "🤖 *پیام سیستم*\n\nمخاطب شما پروفایل شما را مشاهده کرد. 👁",
+                "parse_mode": "Markdown"
+            }))
             return
         else:
             await client.send_message(chat_id, "⚠️ مشخصات پروفایل طرف مقابل در حال حاضر در دسترس نیست.", reply_markup=kb.kb_chat_menu())
@@ -992,6 +1070,43 @@ async def msg_chat_partner_profile(client, message):
         )
     except Exception:
         pass
+
+@bot.on_callback_query(regex(r"^game:gol:") & private)
+async def cb_game_gol_bridge(client, callback_query):
+    user = await get_event_user(callback_query)
+    other_uid = user.get("chat_with")
+    if not other_uid or not str(other_uid).startswith("bridge_hamraz_"):
+        try:
+            await callback_query.answer("❗️ چت فعال نیست.", show_alert=True)
+        except Exception:
+            pass
+        return
+    hamraz_uid = str(other_uid).replace("bridge_hamraz_", "")
+    url = "https://bale.hamrazma.ir/bridge_api.php?action=game_callback"
+    import urllib.request
+    import urllib.parse
+    import ssl
+    data = {
+        "v2_uid": str(callback_query.author.id),
+        "hamraz_uid": hamraz_uid,
+        "callback_data": callback_query.data,
+        "message_id": getattr(callback_query.message, "id", 0)
+    }
+    try:
+        def _post():
+            encoded = urllib.parse.urlencode(data).encode("utf-8")
+            req = urllib.request.Request(url, data=encoded, headers={"X-Bridge-Token": SHARED_BRIDGE_SECRET})
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                return resp.read().decode("utf-8")
+        await asyncio.to_thread(_post)
+    except Exception as e:
+        _log_bridge_relay(f"GAME_CALLBACK_FAIL: {e}")
+    try:
+        await callback_query.answer()
+    except Exception:
+        pass
+
 
 @bot.on_message(equals("/start") & in_active_chat & private)
 async def msg_start(client, message):

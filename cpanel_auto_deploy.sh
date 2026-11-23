@@ -48,6 +48,12 @@ if [ -f "$DEPLOYED_FILE" ]; then
     DEPLOYED_SHA=$(tr -dc '0-9a-f' < "$DEPLOYED_FILE")
 fi
 if [ "$REMOTE_SHA" = "$DEPLOYED_SHA" ]; then
+    if [ -f "$APP_DIR/restart.trigger" ]; then
+        rm -f "$APP_DIR/restart.trigger"
+        log "restart.trigger found; restarting bot"
+        /bin/chmod 700 "$APP_DIR/runner.sh"
+        /usr/bin/env bash "$APP_DIR/runner.sh"
+    fi
     exit 0
 fi
 
