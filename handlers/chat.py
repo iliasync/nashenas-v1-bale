@@ -86,6 +86,8 @@ async def start_chat_between(uid1, uid2) -> bool:
 
 async def end_chat_for(uid):
     uid = str(uid)
+    if uid.startswith("bridge_hamraz_"):
+        return None
     u = await db.get_user(uid, create_if_missing=False)
     if not u:
         return None
@@ -136,6 +138,20 @@ async def _clear_active_chat_games(client, uid):
         pass
 
 
+async def notify_hamraz_user_left(v2_uid, hamraz_uid):
+    import aiohttp
+    secret = "Hamraz_Bridge_Sec_7f4d92a18b5c3e0964fa1d8e2b7c4a9382f6e501d4cb98e7235a6104bc8f9a2e"
+    url = f"https://bale.hamrazma.ir/bridge_api.php?action=user_left&v2_uid={v2_uid}&hamraz_uid={hamraz_uid}"
+    try:
+        timeout = aiohttp.ClientTimeout(total=3, connect=2)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            headers = {"X-Bridge-Token": secret}
+            async with session.get(url, headers=headers) as resp:
+                await resp.json()
+    except Exception:
+        pass
+
+
 async def _finish_chat_end(client, chat_id, user, reply_to_message_id=None):
     other_uid = user.get("chat_with")
     _clear_pending_chat_invites(chat_id, other_uid)
@@ -143,7 +159,20 @@ async def _finish_chat_end(client, chat_id, user, reply_to_message_id=None):
 
     await end_chat_for(chat_id)
     if other_uid:
-        await end_chat_for(other_uid)
+        if str(other_uid).startswith("bridge_hamraz_"):
+            hamraz_uid = str(other_uid).replace("bridge_hamraz_", "")
+            asyncio.create_task(notify_hamraz_user_left(str(chat_id), hamraz_uid))
+        else:
+            await end_chat_for(other_uid)
+            try:
+                await client.send_message(
+                    int(other_uid),
+                    "✅ چت توسط مخاطب قطع شد.\n\nشما به منوی اصلی برگشتید.",
+                    reply_markup=kb.kb_main_menu(),
+                )
+            except Exception:
+                pass
+            await notify_watchers_chat_end(client, other_uid)
 
     try:
         await client.send_message(
@@ -154,16 +183,6 @@ async def _finish_chat_end(client, chat_id, user, reply_to_message_id=None):
         )
     except Exception:
         pass
-    if other_uid:
-        try:
-            await client.send_message(
-                int(other_uid),
-                "✅ چت توسط مخاطب قطع شد.\n\nشما به منوی اصلی برگشتید.",
-                reply_markup=kb.kb_main_menu(),
-            )
-        except Exception:
-            pass
-        await notify_watchers_chat_end(client, other_uid)
     await notify_watchers_chat_end(client, chat_id)
 
 
@@ -192,6 +211,191 @@ async def notify_watchers_chat_end(client, target_uid_str):
     await db.save_user(target_uid_str, tu)
 
 
+HOST_1_BOT_TOKEN = "1344134282:WntRBsTUSCL6gdWtcRhuRt42pRfSFJTo0NM"
+MEDIA_LOG_CHANNEL_ID = 5246596411
+
+
+async def call_bale_hamraz(method: str, data: dict):
+    import aiohttp
+    url = f"https://tapi.bale.ai/bot{HOST_1_BOT_TOKEN}/{method}"
+    try:
+        timeout = aiohttp.ClientTimeout(total=4, connect=2)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=data) as resp:
+                return await resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def check_bridge_hamraz_blocked(client, from_uid_str, res):
+    if isinstance(res, dict) and not res.get("ok"):
+        error_code = res.get("error_code", 0)
+        desc = str(res.get("description", "")).lower()
+        if error_code in (403, 400) or "blocked" in desc or "deactivated" in desc or "chat not found" in desc:
+            u = await db.get_user(from_uid_str, create_if_missing=False)
+            if u:
+                u["chat_with"] = None
+                u["chat_started_at"] = None
+                await db.save_user(from_uid_str, u)
+            try:
+                await client.send_message(
+                    int(from_uid_str),
+                    "⚠️ *گفتگو به پایان رسید.*\n\nارتباط با هم‌صحبت شما قطع شد (کاربر ربات را مسدود یا حساب خود را غیرفعال کرده است).\nشما به منوی اصلی برگشتید.",
+                    reply_markup=kb.kb_main_menu()
+                )
+            except Exception:
+                pass
+            return True
+    return False
+
+
+async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, message):
+    sender_name = fu.get("display_name") or "ناشناس"
+
+    if message.text:
+        res = await call_bale_hamraz("sendMessage", {
+            "chat_id": hamraz_uid,
+            "text": message.text
+        })
+        await check_bridge_hamraz_blocked(client, from_uid_str, res)
+        return
+
+    if message.photo:
+        photo_obj = message.photo[-1] if isinstance(message.photo, list) else message.photo
+        file_id = getattr(photo_obj, "id", None) or getattr(photo_obj, "file_id", "")
+        caption = message.caption or ""
+        res = await call_bale_hamraz("sendPhoto", {
+            "chat_id": hamraz_uid,
+            "photo": file_id,
+            "caption": caption
+        })
+        if await check_bridge_hamraz_blocked(client, from_uid_str, res):
+            return
+        log_card = (
+            f"🖼 *لاگ رسانه جدید — عکس*\n\n"
+            f"🏷 *منبع: [ناشناس۲]* (چت اشتراکی)\n\n"
+            f"👤 فرستنده ([ناشناس۲]): [{sender_name}] | [{from_uid_str}](uid:{from_uid_str})\n\n"
+            f"🎯 گیرنده ([همراز]): [مخاطب] | [{hamraz_uid}](uid:{hamraz_uid})\n\n"
+            f"📝 کپشن: {caption or 'بدون کپشن'}"
+        )
+        await call_bale_hamraz("sendPhoto", {
+            "chat_id": MEDIA_LOG_CHANNEL_ID,
+            "photo": file_id,
+            "caption": log_card,
+            "parse_mode": "Markdown"
+        })
+        return
+
+    if getattr(message, "video", None):
+        file_id = getattr(message.video, "id", None) or getattr(message.video, "file_id", "")
+        caption = message.caption or ""
+        res = await call_bale_hamraz("sendVideo", {
+            "chat_id": hamraz_uid,
+            "video": file_id,
+            "caption": caption
+        })
+        if await check_bridge_hamraz_blocked(client, from_uid_str, res):
+            return
+        log_card = (
+            f"🖼 *لاگ رسانه جدید — ویدئو*\n\n"
+            f"🏷 *منبع: [ناشناس۲]* (چت اشتراکی)\n\n"
+            f"👤 فرستنده ([ناشناس۲]): [{sender_name}] | [{from_uid_str}](uid:{from_uid_str})\n\n"
+            f"🎯 گیرنده ([همراز]): [مخاطب] | [{hamraz_uid}](uid:{hamraz_uid})\n\n"
+            f"📝 کپشن: {caption or 'بدون کپشن'}"
+        )
+        await call_bale_hamraz("sendVideo", {
+            "chat_id": MEDIA_LOG_CHANNEL_ID,
+            "video": file_id,
+            "caption": log_card,
+            "parse_mode": "Markdown"
+        })
+        return
+
+    if getattr(message, "voice", None):
+        file_id = getattr(message.voice, "id", None) or getattr(message.voice, "file_id", "")
+        caption = message.caption or ""
+        res = await call_bale_hamraz("sendVoice", {
+            "chat_id": hamraz_uid,
+            "voice": file_id,
+            "caption": caption
+        })
+        if await check_bridge_hamraz_blocked(client, from_uid_str, res):
+            return
+        log_card = (
+            f"🖼 *لاگ رسانه جدید — ویس*\n\n"
+            f"🏷 *منبع: [ناشناس۲]* (چت اشتراکی)\n\n"
+            f"👤 فرستنده ([ناشناس۲]): [{sender_name}] | [{from_uid_str}](uid:{from_uid_str})\n\n"
+            f"🎯 گیرنده ([همراز]): [مخاطب] | [{hamraz_uid}](uid:{hamraz_uid})\n\n"
+            f"📝 کپشن: {caption or 'بدون کپشن'}"
+        )
+        await call_bale_hamraz("sendVoice", {
+            "chat_id": MEDIA_LOG_CHANNEL_ID,
+            "voice": file_id,
+            "caption": log_card,
+            "parse_mode": "Markdown"
+        })
+        return
+
+    if getattr(message, "audio", None):
+        file_id = getattr(message.audio, "id", None) or getattr(message.audio, "file_id", "")
+        caption = message.caption or ""
+        res = await call_bale_hamraz("sendAudio", {
+            "chat_id": hamraz_uid,
+            "audio": file_id,
+            "caption": caption
+        })
+        if await check_bridge_hamraz_blocked(client, from_uid_str, res):
+            return
+        log_card = (
+            f"🖼 *لاگ رسانه جدید — صوت*\n\n"
+            f"🏷 *منبع: [ناشناس۲]* (چت اشتراکی)\n\n"
+            f"👤 فرستنده ([ناشناس۲]): [{sender_name}] | [{from_uid_str}](uid:{from_uid_str})\n\n"
+            f"🎯 گیرنده ([همراز]): [مخاطب] | [{hamraz_uid}](uid:{hamraz_uid})\n\n"
+            f"📝 کپشن: {caption or 'بدون کپشن'}"
+        )
+        await call_bale_hamraz("sendAudio", {
+            "chat_id": MEDIA_LOG_CHANNEL_ID,
+            "audio": file_id,
+            "caption": log_card,
+            "parse_mode": "Markdown"
+        })
+        return
+
+    if getattr(message, "document", None):
+        file_id = getattr(message.document, "id", None) or getattr(message.document, "file_id", "")
+        caption = message.caption or ""
+        res = await call_bale_hamraz("sendDocument", {
+            "chat_id": hamraz_uid,
+            "document": file_id,
+            "caption": caption
+        })
+        if await check_bridge_hamraz_blocked(client, from_uid_str, res):
+            return
+        log_card = (
+            f"🖼 *لاگ رسانه جدید — فایل*\n\n"
+            f"🏷 *منبع: [ناشناس۲]* (چت اشتراکی)\n\n"
+            f"👤 فرستنده ([ناشناس۲]): [{sender_name}] | [{from_uid_str}](uid:{from_uid_str})\n\n"
+            f"🎯 گیرنده ([همراز]): [مخاطب] | [{hamraz_uid}](uid:{hamraz_uid})\n\n"
+            f"📝 کپشن: {caption or 'بدون کپشن'}"
+        )
+        await call_bale_hamraz("sendDocument", {
+            "chat_id": MEDIA_LOG_CHANNEL_ID,
+            "document": file_id,
+            "caption": log_card,
+            "parse_mode": "Markdown"
+        })
+        return
+
+    if getattr(message, "sticker", None):
+        file_id = getattr(message.sticker, "id", None) or getattr(message.sticker, "file_id", "")
+        res = await call_bale_hamraz("sendSticker", {
+            "chat_id": hamraz_uid,
+            "sticker": file_id
+        })
+        await check_bridge_hamraz_blocked(client, from_uid_str, res)
+        return
+
+
 async def relay_message_to_partner(client, from_uid_str, message):
     fu = await db.get_user(from_uid_str, create_if_missing=False)
     if not fu:
@@ -199,6 +403,13 @@ async def relay_message_to_partner(client, from_uid_str, message):
     other_uid = fu.get("chat_with")
     if not other_uid:
         return
+
+    # Check if this is a cross-bot bridge chat to Hamraz
+    if str(other_uid).startswith("bridge_hamraz_"):
+        hamraz_uid = int(str(other_uid).replace("bridge_hamraz_", ""))
+        await relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, message)
+        return
+
     ou = await db.get_user(other_uid, create_if_missing=False)
     if not ou:
         return
@@ -589,6 +800,15 @@ async def cb_chat_end_confirm(client, callback_query):
 async def msg_gift_button(client, message):
     user = await get_event_user(message)
     chat_id = message.chat.id
+    other_uid = user.get("chat_with")
+    if str(other_uid).startswith("bridge_hamraz_"):
+        await client.send_message(
+            chat_id,
+            "⚠️ امکان انتقال سکه به کاربر خارج از این ربات وجود ندارد.",
+            reply_markup=kb.kb_chat_menu(),
+            reply_to_message_id=message.id,
+        )
+        return
     user["state"] = "chat_gift_wait_amount"
     await db.save_user(chat_id, user)
     await client.send_message(
@@ -667,6 +887,14 @@ async def msg_gift_amount(client, message):
 @bot.on_message(equals("🎮 دوز با مخاطب") & private & in_active_chat)
 async def msg_chat_dooz_invite(client, message):
     user = await get_event_user(message)
+    if str(user.get("chat_with", "")).startswith("bridge_hamraz_"):
+        await client.send_message(
+            message.chat.id,
+            "⚠️ امکان بازی دو‌نفره دوز در گفتگوی متقاطع فعال نیست.",
+            reply_markup=kb.kb_chat_menu(),
+            reply_to_message_id=message.id,
+        )
+        return
     from handlers.dooz import send_chat_dooz_invite
     await send_chat_dooz_invite(client, message.chat.id, user)
 
@@ -674,6 +902,14 @@ async def msg_chat_dooz_invite(client, message):
 @bot.on_message(equals("✂️ سنگ کاغذ قیچی با مخاطب") & private & in_active_chat)
 async def msg_chat_rps_invite(client, message):
     user = await get_event_user(message)
+    if str(user.get("chat_with", "")).startswith("bridge_hamraz_"):
+        await client.send_message(
+            message.chat.id,
+            "⚠️ امکان بازی دو‌نفره سنگ کاغذ قیچی در گفتگوی متقاطع فعال نیست.",
+            reply_markup=kb.kb_chat_menu(),
+            reply_to_message_id=message.id,
+        )
+        return
     from handlers.rps import send_chat_rps_invite
     await send_chat_rps_invite(client, message.chat.id, user)
 
@@ -686,6 +922,54 @@ async def msg_chat_partner_profile(client, message):
     if not other_uid:
         await client.send_message(chat_id, "⚠️ چت فعال نیست.", reply_markup=kb.kb_main_menu(), reply_to_message_id=message.id)
         return
+
+    if str(other_uid).startswith("bridge_hamraz_"):
+        import aiohttp
+        hamraz_uid = str(other_uid).replace("bridge_hamraz_", "")
+        secret = "Hamraz_Bridge_Sec_7f4d92a18b5c3e0964fa1d8e2b7c4a9382f6e501d4cb98e7235a6104bc8f9a2e"
+        url = f"https://bale.hamrazma.ir/bridge_api.php?action=get_profile&hamraz_uid={hamraz_uid}"
+        timeout = aiohttp.ClientTimeout(total=3, connect=2)
+        profile_data = None
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                headers = {"X-Bridge-Token": secret}
+                async with session.get(url, headers=headers) as resp:
+                    profile_data = await resp.json()
+        except Exception:
+            profile_data = None
+
+        if profile_data and profile_data.get("ok"):
+            p_name = profile_data.get("name") or "ناشناس همراز"
+            p_sex = profile_data.get("sex") or "نامشخص"
+            p_age = profile_data.get("age") or 0
+            p_city = profile_data.get("city") or "ثبت نشده"
+            p_bio = profile_data.get("bio") or ""
+            p_photo = profile_data.get("photo") or ""
+            p_likes = profile_data.get("likes") or 0
+
+            text = (
+                f"👤 *مشخصات هم‌صحبت شما (همراز)*\n\n"
+                f"• نام: *{p_name}*\n"
+                f"• جنسیت: *{p_sex}*\n"
+                f"• سن: *{p_age}*\n"
+                f"• شهر: *{p_city}*\n"
+                f"• لایک‌ها: *{p_likes}*\n"
+            )
+            if p_bio:
+                text += f"\n📝 بیو: _{p_bio}_\n"
+
+            if p_photo:
+                try:
+                    await client.send_photo(chat_id, p_photo, caption=text, reply_markup=kb.kb_chat_menu())
+                    return
+                except Exception:
+                    pass
+            await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
+            return
+        else:
+            await client.send_message(chat_id, "⚠️ مشخصات پروفایل طرف مقابل در حال حاضر در دسترس نیست.", reply_markup=kb.kb_chat_menu())
+            return
+
     other_user = await db.get_user(other_uid, create_if_missing=False)
     if not other_user:
         await client.send_message(chat_id, "⚠️ خطا در مخاطب.", reply_markup=kb.kb_main_menu(), reply_to_message_id=message.id)
