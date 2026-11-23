@@ -139,15 +139,16 @@ async def _clear_active_chat_games(client, uid):
 
 
 async def notify_hamraz_user_left(v2_uid, hamraz_uid):
-    import aiohttp
+    import urllib.request
+    import json
     secret = "Hamraz_Bridge_Sec_7f4d92a18b5c3e0964fa1d8e2b7c4a9382f6e501d4cb98e7235a6104bc8f9a2e"
     url = f"https://bale.hamrazma.ir/bridge_api.php?action=user_left&v2_uid={v2_uid}&hamraz_uid={hamraz_uid}"
     try:
-        timeout = aiohttp.ClientTimeout(total=3, connect=2)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            headers = {"X-Bridge-Token": secret}
-            async with session.get(url, headers=headers) as resp:
-                await resp.json()
+        def _call():
+            req = urllib.request.Request(url, headers={"X-Bridge-Token": secret})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        await asyncio.to_thread(_call)
     except Exception:
         pass
 
@@ -216,13 +217,17 @@ MEDIA_LOG_CHANNEL_ID = 5246596411
 
 
 async def call_bale_hamraz(method: str, data: dict):
-    import aiohttp
+    import urllib.request
+    import urllib.parse
+    import json
     url = f"https://tapi.bale.ai/bot{HOST_1_BOT_TOKEN}/{method}"
     try:
-        timeout = aiohttp.ClientTimeout(total=4, connect=2)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, data=data) as resp:
-                return await resp.json()
+        def _post():
+            encoded = urllib.parse.urlencode(data).encode("utf-8")
+            req = urllib.request.Request(url, data=encoded)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        return await asyncio.to_thread(_post)
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -924,17 +929,18 @@ async def msg_chat_partner_profile(client, message):
         return
 
     if str(other_uid).startswith("bridge_hamraz_"):
-        import aiohttp
+        import urllib.request
+        import json
         hamraz_uid = str(other_uid).replace("bridge_hamraz_", "")
         secret = "Hamraz_Bridge_Sec_7f4d92a18b5c3e0964fa1d8e2b7c4a9382f6e501d4cb98e7235a6104bc8f9a2e"
         url = f"https://bale.hamrazma.ir/bridge_api.php?action=get_profile&hamraz_uid={hamraz_uid}"
-        timeout = aiohttp.ClientTimeout(total=3, connect=2)
         profile_data = None
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                headers = {"X-Bridge-Token": secret}
-                async with session.get(url, headers=headers) as resp:
-                    profile_data = await resp.json()
+            def _fetch():
+                req = urllib.request.Request(url, headers={"X-Bridge-Token": secret})
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            profile_data = await asyncio.to_thread(_fetch)
         except Exception:
             profile_data = None
 
