@@ -63,6 +63,8 @@ async def clear_active_chat_games(client, uid):
 
 async def end_chat_for(uid, client=None):
     uid = str(uid)
+    if uid.startswith("bridge_hamraz_"):
+        return None
     user = await db.get_user(uid, create_if_missing=False)
     if not user:
         return None
@@ -85,6 +87,10 @@ async def relay_message_to_partner(client, from_uid_str, message):
     other_uid = from_user.get("chat_with")
     if not other_uid:
         return
+    if str(other_uid).startswith("bridge_hamraz_"):
+        await _original_relay_message_to_partner(client, from_uid_str, message)
+        return
+
     other_user = await db.get_user(other_uid, create_if_missing=False)
     if not other_user:
         return
