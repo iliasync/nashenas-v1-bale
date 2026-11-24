@@ -452,6 +452,29 @@ async def get_chat_message_link(source_chat, source_message):
     return (row["target_chat"], row["target_message"]) if row else None
 
 
+async def get_chat_message_link_bridge(source_chat, source_message):
+    s_bare = str(source_chat).replace("bridge_v2_", "").replace("bridge_hamraz_", "")
+    cur = await _conn().execute(
+        "SELECT target_message FROM chat_message_links "
+        "WHERE (source_chat = ? OR source_chat = ? OR source_chat = ?) "
+        "AND source_message = ? ORDER BY created_at DESC LIMIT 1",
+        (s_bare, f"bridge_v2_{s_bare}", f"bridge_hamraz_{s_bare}", int(source_message))
+    )
+    row = await cur.fetchone()
+    if row:
+        return row[0] if isinstance(row, (tuple, list)) else row["target_message"]
+    cur2 = await _conn().execute(
+        "SELECT source_message FROM chat_message_links "
+        "WHERE (target_chat = ? OR target_chat = ? OR target_chat = ?) "
+        "AND target_message = ? ORDER BY created_at DESC LIMIT 1",
+        (s_bare, f"bridge_v2_{s_bare}", f"bridge_hamraz_{s_bare}", int(source_message))
+    )
+    row2 = await cur2.fetchone()
+    if row2:
+        return row2[0] if isinstance(row2, (tuple, list)) else row2["source_message"]
+    return None
+
+
 async def add_coins_to_all_users(amount: int, include_banned: bool = False) -> int:
     """افزایش سکه کاربران در یک تراکنش؛ مناسب برای سکه همگانی."""
     amount = safe_int(amount, 0)

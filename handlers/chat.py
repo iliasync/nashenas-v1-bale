@@ -310,17 +310,22 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
 
     # پشتیبانی از ریپلای متقابل در پل ارتباطی
     reply_to = getattr(getattr(message, "reply_to_message", None), "id", None)
-    link = await db.get_chat_message_link(from_uid_str, reply_to) if reply_to else None
-    target_reply_id = link[1] if link and str(link[0]) == f"bridge_hamraz_{hamraz_uid}" else None
+    target_reply_id = None
+    if reply_to:
+        target_reply_id = await db.get_chat_message_link_bridge(from_uid_str, reply_to)
 
     async def remember(sent_res):
         if isinstance(sent_res, dict) and sent_res.get("ok"):
             target_id = sent_res.get("result", {}).get("message_id")
             if target_id:
-                await db.save_chat_message_link(from_uid_str, message.id, f"bridge_hamraz_{hamraz_uid}", target_id)
-                await db.save_chat_message_link(f"bridge_hamraz_{hamraz_uid}", target_id, from_uid_str, message.id)
+                s_bare = from_uid_str.replace("bridge_v2_", "")
+                t_bare = str(hamraz_uid).replace("bridge_hamraz_", "")
+                await db.save_chat_message_link(s_bare, message.id, t_bare, target_id)
+                await db.save_chat_message_link(t_bare, target_id, s_bare, message.id)
+                await db.save_chat_message_link(f"bridge_v2_{s_bare}", message.id, f"bridge_hamraz_{t_bare}", target_id)
+                await db.save_chat_message_link(f"bridge_hamraz_{t_bare}", target_id, f"bridge_v2_{s_bare}", message.id)
                 asyncio.create_task(notify_hamraz_record_message(
-                    sender=f"bridge_v2_{from_uid_str}",
+                    sender=f"bridge_v2_{s_bare}",
                     side=str(hamraz_uid),
                     message_id=target_id,
                     reply_message_id=message.id
@@ -328,7 +333,7 @@ async def relay_bridge_message_to_hamraz(client, from_uid_str, fu, hamraz_uid, m
 
     payload = {"chat_id": hamraz_uid}
     if target_reply_id:
-        payload["reply_to_message_id"] = target_reply_id
+        payload["reply_to_message_id"] = int(target_reply_id)
 
     if message.text:
         payload["text"] = message.text
