@@ -68,11 +68,34 @@ if ! grep -q '^BUILD_MARKER = ' "$REPO_DIR/config.py"; then
     exit 1
 fi
 
-if ! /usr/bin/rsync -a \
-    --exclude=.git/ --exclude=.env --exclude=bot.pid --exclude=bot.log \
-    --exclude=bot.sqlite3 --exclude=bot.sqlite3-shm --exclude=bot.sqlite3-wal \
-    --exclude=__pycache__/ --exclude='*.pyc' ./ "$APP_DIR/"; then
-    log "rsync failed for $REMOTE_SHA"
+if ! "$PYTHON_BIN" -c "
+import os, shutil
+
+src = '.'
+dst = '$APP_DIR'
+ignore_list = {'.git', '.env', 'bot.pid', 'bot.log', 'bot.sqlite3', 'bot.sqlite3-shm', 'bot.sqlite3-wal', '__pycache__', 'auto_deploy.log', 'auto_deploy.lock'}
+
+for root, dirs, files in os.walk(src):
+    rel_root = os.path.relpath(root, src)
+    if rel_root == '.':
+        dirs[:] = [d for d in dirs if d not in ignore_list]
+        target_dir = dst
+    else:
+        parts = rel_root.split(os.sep)
+        if any(p in ignore_list for p in parts):
+            continue
+        dirs[:] = [d for d in dirs if d not in ignore_list]
+        target_dir = os.path.join(dst, rel_root)
+        os.makedirs(target_dir, exist_ok=True)
+
+    for f in files:
+        if f in ignore_list or f.endswith('.pyc') or f.endswith('.deployed_sha'):
+            continue
+        s_file = os.path.join(root, f)
+        d_file = os.path.join(target_dir, f)
+        shutil.copy2(s_file, d_file)
+"; then
+    log "file sync failed for $REMOTE_SHA"
     exit 1
 fi
 
