@@ -1042,7 +1042,31 @@ async def msg_chat_partner_profile(client, message):
 
             if p_photo:
                 try:
-                    await client.send_photo(chat_id, p_photo, caption=text, reply_markup=kb.kb_chat_menu())
+                    import io
+                    def _dl_hamraz_photo(photo_ref: str):
+                        if photo_ref.startswith("http://") or photo_ref.startswith("https://"):
+                            req = urllib.request.Request(photo_ref, headers={"User-Agent": "Mozilla/5.0"})
+                            with urllib.request.urlopen(req, timeout=6) as r:
+                                return r.read()
+                        hamraz_tok = "1344134282:WntRBsTUSCL6gdWtcRhuRt42pRfSFJTo0NM"
+                        gf_url = f"https://tapi.bale.ai/bot{hamraz_tok}/getFile?file_id={urllib.parse.quote(photo_ref)}"
+                        with urllib.request.urlopen(gf_url, timeout=4) as r:
+                            gf_res = json.loads(r.read().decode("utf-8"))
+                        if gf_res.get("ok") and gf_res.get("result", {}).get("file_path"):
+                            fp = gf_res["result"]["file_path"]
+                            dl_url = f"https://tapi.bale.ai/file/bot{hamraz_tok}/{fp}"
+                            with urllib.request.urlopen(dl_url, timeout=6) as r2:
+                                return r2.read()
+                        return None
+
+                    import urllib.parse
+                    img_bytes = await asyncio.to_thread(_dl_hamraz_photo, str(p_photo))
+                    if img_bytes:
+                        bio = io.BytesIO(img_bytes)
+                        bio.name = "avatar.jpg"
+                        await client.send_photo(chat_id, bio, caption=text, reply_markup=kb.kb_chat_menu())
+                    else:
+                        await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
                 except Exception:
                     await client.send_message(chat_id, text, reply_markup=kb.kb_chat_menu())
             else:
