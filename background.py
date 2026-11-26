@@ -70,6 +70,11 @@ async def attempt_bridge_matchmaking_v2(client):
 
 
 async def periodic_cleanup_loop(client):
+    import os
+    import time
+    import database as db
+    hb_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "heartbeat.ts")
+    last_hb = 0.0
     while True:
         try:
             await mm_cleanup_expired(client)
@@ -83,4 +88,14 @@ async def periodic_cleanup_loop(client):
             await attempt_bridge_matchmaking_v2(client)
         except Exception as e:
             print(f"[background] attempt_bridge_matchmaking_v2 error: {e}")
+        now_t = time.time()
+        if now_t - last_hb >= 30:
+            try:
+                cur = await db._conn().execute("SELECT 1")
+                await cur.fetchone()
+                with open(hb_path, "w", encoding="utf-8") as hf:
+                    hf.write(str(int(now_t)))
+                last_hb = now_t
+            except Exception as e:
+                print(f"[background] heartbeat db check failed: {e}")
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)

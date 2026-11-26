@@ -1,94 +1,119 @@
 #!/bin/bash
 
 APP_DIR="/home/jowkdwuy/nashenasV2"
-SOURCE_REPO_DIR="/home/jowkdwuy/repositories/nashenasV2"
 PYTHON_BIN="/home/jowkdwuy/virtualenv/nashenasV2/3.12/bin/python"
 MAIN_FILE="$APP_DIR/main.py"
 PID_FILE="$APP_DIR/bot.pid"
-# cPanel ممکن است redirection به /dev/null را محدود کند؛ لاگ محلیِ چرخشی
-# استفاده می‌کنیم تا هم قابل‌نوشتن باشد و هم هیچ‌وقت بزرگ نشود.
+HB_FILE="$APP_DIR/heartbeat.ts"
 LOG_FILE="${BOT_LOG_FILE:-$APP_DIR/bot.log}"
-MAX_LOG_BYTES=1048576
-if ! (touch "$LOG_FILE" 2>/dev/null); then
-    LOG_FILE="$APP_DIR/.bot-runtime.log"
-    touch "$LOG_FILE" 2>/dev/null || exit 1
+MAX_LOG_BYTES=10485760
+
+export PYTHONUNBUFFERED=1
+cd "$APP_DIR" || exit 1
+
+if [ -f "$APP_DIR/.env" ]; then
+    set -a
+    . "$APP_DIR/.env"
+    set +a
 fi
 
 if [ -f "$LOG_FILE" ]; then
     LOG_SIZE=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
     if [ "$LOG_SIZE" -ge "$MAX_LOG_BYTES" ]; then
-        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || :
-        : > "$LOG_FILE" 2>/dev/null || true
+        mv -f "$LOG_FILE" "${LOG_FILE}.old" 2>/dev/null || :
+        : > "$LOG_FILE" 2> /dev/null || true
     fi
 fi
 
-cd "$APP_DIR" || exit 1
-
-if [ -f "$APP_DIR/.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    . "$APP_DIR/.env"
-    set +a
+if [ -f "${LOG_FILE}.old" ]; then
+    OLD_LOG_SIZE=$(wc -c < "${LOG_FILE}.old" 2>/dev/null || echo 0)
+    if [ "$OLD_LOG_SIZE" -ge "$MAX_LOG_BYTES" ]; then
+        : > "${LOG_FILE}.old" 2> /dev/null || true
+    fi
 fi
 
-OLD_PID=""
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(tr -dc '0-9' < "$PID_FILE")
+CRASH_REASON=""
+if [ -f "$APP_DIR/restart.trigger" ]; then
+    rm -f "$APP_DIR/restart.trigger"
+    ACTION="restart"
+else
+    ACTION="${1:-watchdog}"
 fi
 
-# همه نمونه‌های main.py متعلق به همین پوشه و همین کاربر را جمع می‌کنیم؛ وجود
-# چند نمونه قدیمی باعث می‌شود بخشی از پیام‌ها به کد قدیمی برسد.
-CANDIDATE_PIDS="$OLD_PID"
-if command -v pgrep >/dev/null 2>&1; then
-    FOUND_PIDS=$(pgrep -u "$(id -u)" -f '(^|/)main\.py([[:space:]]|$)' 2>/dev/null || true)
-    CANDIDATE_PIDS="$CANDIDATE_PIDS $FOUND_PIDS"
-fi
+if [ "$ACTION" = "watchdog" ]; then
+    ALIVE=0
+    if [ -f "$PID_FILE" ]; then
+        PID=$(tr -dc '0-9' < "$PID_FILE" 2>/dev/null)
+        if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+            ALIVE=1
+        else
+            CRASH_REASON="پروسس ربات (PID $PID) متوقف یا توسط سرور Kill شده بود"
+            rm -f "$PID_FILE"
+        fi
+    else
+        CRASH_REASON="فایل PID ربات وجود نداشت (ربات خاموش بود)"
+    fi
 
-VALID_PIDS=""
-for PID in $CANDIDATE_PIDS; do
-    case "$PID" in *[!0-9]*|'') continue ;; esac
-    kill -0 "$PID" 2>/dev/null || continue
-    OLD_CMD=$(ps -p "$PID" -o args= 2>/dev/null)
-    OLD_CWD=$(readlink "/proc/$PID/cwd" 2>/dev/null || true)
-    case "$OLD_CMD" in
-        *"$MAIN_FILE"*) VALID_PIDS="$VALID_PIDS $PID" ;;
-        *"$SOURCE_REPO_DIR/main.py"*) VALID_PIDS="$VALID_PIDS $PID" ;;
-        *"main.py"*)
-            if [ "$OLD_CWD" = "$APP_DIR" ] || [ "$OLD_CWD" = "$SOURCE_REPO_DIR" ]; then
-                VALID_PIDS="$VALID_PIDS $PID"
+    # Check heartbeat freeze (> 180s stale)
+    if [ "$ALIVE" = "1" ] && [ -f "$HB_FILE" ]; then
+        LAST_HB=$(tr -dc '0-9' < "$HB_FILE" 2>/dev/null || echo 0)
+        NOW_TS=$(date +%s)
+        if [ -n "$LAST_HB" ] && [ "$LAST_HB" -gt 0 ]; then
+            DIFF=$((NOW_TS - LAST_HB))
+            if [ "$DIFF" -gt 180 ]; then
+                CRASH_REASON="ربات به مدت ${DIFF} ثانیه فریز شده بود (عدم ثبت Heartbeat یا قفل دیتابیس)"
+                ACTION="restart"
+            else
+                exit 0
             fi
-            ;;
-        *)
-            echo "$(date) - Ignored unrelated PID $PID: $OLD_CMD" >> "$LOG_FILE"
-            ;;
-    esac
-done
-
-VALID_PIDS=$(printf '%s\n' $VALID_PIDS | awk 'NF && !seen[$1]++ {print $1}')
-if [ -n "$VALID_PIDS" ]; then
-    echo "$(date) - Stopping old bot PID(s): $(echo "$VALID_PIDS" | tr '\n' ' ')" >> "$LOG_FILE"
-    kill $VALID_PIDS 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        STILL_RUNNING=""
-        for PID in $VALID_PIDS; do
-            kill -0 "$PID" 2>/dev/null && STILL_RUNNING="$STILL_RUNNING $PID"
-        done
-        [ -z "$STILL_RUNNING" ] && break
-        sleep 1
-    done
-    for PID in $VALID_PIDS; do
-        kill -0 "$PID" 2>/dev/null && kill -KILL "$PID" 2>/dev/null || true
-    done
+        else
+            exit 0
+        fi
+    elif [ "$ALIVE" = "1" ]; then
+        exit 0
+    fi
 fi
-rm -f "$PID_FILE"
 
+if [ "$ACTION" = "restart" ] || [ "$ACTION" = "force-restart" ] || [ "$ACTION" = "stop" ]; then
+    if [ -f "$PID_FILE" ]; then
+        OLD_PID=$(tr -dc '0-9' < "$PID_FILE" 2>/dev/null)
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+            kill "$OLD_PID" 2>/dev/null || true
+            sleep 2
+            kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+    fi
+    pkill -u "$(id -u)" -f "(^|/)python.*nashenasV2/main" 2>/dev/null || true
+    if [ "$ACTION" = "stop" ]; then
+        exit 0
+    fi
+fi
+
+date +%s > "$HB_FILE"
 nohup "$PYTHON_BIN" "$MAIN_FILE" >> "$LOG_FILE" 2>&1 &
-echo $! > "$PID_FILE"
+NEW_PID=$!
+echo "$NEW_PID" > "$PID_FILE"
 sleep 2
 
-NEW_PID=$(cat "$PID_FILE")
 if kill -0 "$NEW_PID" 2>/dev/null; then
     echo "$(date) - Bot started with PID $NEW_PID" >> "$LOG_FILE"
+    if [ -n "$CRASH_REASON" ]; then
+        ERR_TAIL=$(tail -n 12 "$LOG_FILE" 2>/dev/null | head -c 900)
+        BOT_TOK="${BOT_TOKEN:-1133133663:vcFyBB7XRfWwHYVk7dpLlQ8pACwb6mM3Bck}"
+        MSG="⚠️ *هشدار مانیتورینگ nashenasV2*
+📌 *علت:* ${CRASH_REASON}
+✅ ربات خودکار با PID جدید \`${NEW_PID}\` روشن شد.
+
+📝 *آخرین لاگ:*
+\`\`\`
+${ERR_TAIL}
+\`\`\`"
+        curl -s -m 4 -X POST "https://tapi.bale.ai/bot${BOT_TOK}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(printf '{"chat_id":2065995342,"text":%s,"parse_mode":"Markdown"}' "$(python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' <<< "$MSG")")" >/dev/null 2>&1 || true
+    fi
+    exit 0
 else
     echo "$(date) - Failed to start bot" >> "$LOG_FILE"
     rm -f "$PID_FILE"
