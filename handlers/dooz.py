@@ -295,13 +295,18 @@ async def send_chat_dooz_invite(client, chat_id, user):
         return
     runtime["pending_chat_dooz_invites"][inviter_id] = peer_id
     inviter_name = (user.get("display_name") or "هم‌صحبت ناشناس").strip()
-    await client.send_message(
-        int(peer_id),
-        "🎮 *دعوت به دوز داخل چت*\n\n"
-        f"{inviter_name} می‌خواد باهات یه دست دوز بازی کنه.\n"
-        "قبول می‌کنی؟ 👇",
-        reply_markup=kb.ikb_chat_dooz_invite(inviter_id),
-    )
+    try:
+        await client.send_message(
+            int(peer_id),
+            "🎮 *دعوت به دوز داخل چت*\n\n"
+            f"{inviter_name} می‌خواد باهات یه دست دوز بازی کنه.\n"
+            "قبول می‌کنی؟ 👇",
+            reply_markup=kb.ikb_chat_dooz_invite(inviter_id),
+        )
+    except Exception:
+        runtime["pending_chat_dooz_invites"].pop(inviter_id, None)
+        await client.send_message(chat_id, "⚠️ امکان ارسال دعوت به این مخاطب وجود ندارد.", reply_markup=kb.kb_chat_menu())
+        return
     await client.send_message(chat_id, "✅ دعوت دوز ارسال شد.\n\nمنتظر جواب مخاطبت بمون؛ همین‌جا خبرت می‌کنم.", reply_markup=kb.ikb_chat_dooz_cancel(inviter_id))
 
 

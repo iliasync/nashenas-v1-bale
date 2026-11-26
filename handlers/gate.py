@@ -44,16 +44,35 @@ ALLOWED_MAIN_COMMANDS = {
 }
 
 
+_STATS_DAY_CACHE = ""
+
+
 async def _touch_user(author):
+    global _STATS_DAY_CACHE
     uid = str(author.id)
     user = await db.get_user(uid)
+    now = now_ts()
+    dirty = False
+
     if user.get("created_at") is None:
-        user["created_at"] = now_ts()
+        user["created_at"] = now
         await db.inc_stat("new_users", 1)
-    await db.ensure_unique_public_id(uid)
-    user["last_seen"] = now_ts()
-    await db.save_user(uid, user)
-    await db.ensure_stats_days()
+        dirty = True
+
+    if not user.get("public_id"):
+        await db.ensure_unique_public_id(uid)
+        dirty = True
+
+    prev_seen = int(user.get("last_seen") or 0)
+    if (now - prev_seen) >= 60 or dirty:
+        user["last_seen"] = now
+        await db.save_user(uid, user)
+
+    from utils import today_str
+    tday = today_str()
+    if _STATS_DAY_CACHE != tday:
+        await db.ensure_stats_days()
+        _STATS_DAY_CACHE = tday
     return uid, user
 
 
