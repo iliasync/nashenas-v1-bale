@@ -27,6 +27,7 @@ from utils import now_ts, today_str, day_str_plus, safe_int, haversine_km, gen_p
 
 _db: Optional[aiosqlite.Connection] = None
 _daily_coin_lock = asyncio.Lock()
+_write_lock = asyncio.Lock()
 
 # کلیدهایی که به صورت ستون مستقیم در جدول users ذخیره می‌شوند (بقیه در extra/JSON می‌روند)
 _COLUMN_KEYS = {
@@ -294,8 +295,18 @@ async def save_user(uid, user: dict):
     db = _conn()
     gps = user.get("gps") or {}
     extra = {k: v for k, v in user.items() if k not in _COLUMN_KEYS and k != "gps"}
-    await db.execute(
-        """
+    params = (
+        uid, safe_int(user.get("coins"), 0), user.get("admin_state"), int(bool(user.get("bot_banned"))),
+        user.get("panel_tmp_target"), user.get("state"), user.get("gender"), user.get("age"),
+        user.get("province"), user.get("city"), user.get("display_name"), user.get("profile_photo_file_id"),
+        int(bool(user.get("profile_completed"))), int(bool(user.get("profile_completion_rewarded"))),
+        user.get("public_id"), safe_int(user.get("likes"), 0), user.get("created_at"), user.get("last_seen"),
+        gps.get("lat"), gps.get("lon"), gps.get("set_at"), int(bool(user.get("gps_rewarded"))),
+        safe_int(user.get("invite_count"), 0), user.get("referred_by"), int(bool(user.get("ref_rewarded"))),
+        user.get("anon_code"), user.get("silent_until"), int(bool(user.get("silent_forever"))),
+        user.get("chat_with"), user.get("chat_started_at"), json.dumps(extra, ensure_ascii=False),
+    )
+    sql = """
         INSERT INTO users (
             user_id, coins, admin_state, bot_banned, panel_tmp_target, state, gender, age, province, city,
             display_name, profile_photo_file_id, profile_completed, profile_completion_rewarded, public_id,
@@ -314,20 +325,18 @@ async def save_user(uid, user: dict):
             referred_by=excluded.referred_by, ref_rewarded=excluded.ref_rewarded, anon_code=excluded.anon_code,
             silent_until=excluded.silent_until, silent_forever=excluded.silent_forever,
             chat_with=excluded.chat_with, chat_started_at=excluded.chat_started_at, extra=excluded.extra
-        """,
-        (
-            uid, safe_int(user.get("coins"), 0), user.get("admin_state"), int(bool(user.get("bot_banned"))),
-            user.get("panel_tmp_target"), user.get("state"), user.get("gender"), user.get("age"),
-            user.get("province"), user.get("city"), user.get("display_name"), user.get("profile_photo_file_id"),
-            int(bool(user.get("profile_completed"))), int(bool(user.get("profile_completion_rewarded"))),
-            user.get("public_id"), safe_int(user.get("likes"), 0), user.get("created_at"), user.get("last_seen"),
-            gps.get("lat"), gps.get("lon"), gps.get("set_at"), int(bool(user.get("gps_rewarded"))),
-            safe_int(user.get("invite_count"), 0), user.get("referred_by"), int(bool(user.get("ref_rewarded"))),
-            user.get("anon_code"), user.get("silent_until"), int(bool(user.get("silent_forever"))),
-            user.get("chat_with"), user.get("chat_started_at"), json.dumps(extra, ensure_ascii=False),
-        ),
-    )
-    await db.commit()
+    """
+    async with _write_lock:
+        for attempt in range(4):
+            try:
+                await db.execute(sql, params)
+                await db.commit()
+                return
+            except aiosqlite.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < 3:
+                    await asyncio.sleep(0.15 * (attempt + 1))
+                    continue
+                raise
 
 
 async def get_user_by_public_id(pid: str):
