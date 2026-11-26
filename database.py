@@ -170,13 +170,17 @@ CREATE INDEX IF NOT EXISTS idx_chat_links_target ON chat_message_links(target_ch
 
 async def init_db():
     global _db
-    _db = await aiosqlite.connect(DB_PATH, timeout=30.0)
+    _db = await aiosqlite.connect(DB_PATH, timeout=30.0, isolation_level=None)
     _db.row_factory = aiosqlite.Row
     await _db.execute("PRAGMA journal_mode=WAL;")
     await _db.execute("PRAGMA busy_timeout=30000;")
     await _db.execute("PRAGMA wal_autocheckpoint=1000;")
     await _db.execute("PRAGMA synchronous=NORMAL;")
     await _db.execute("PRAGMA foreign_keys=ON;")
+    try:
+        await _db.execute("PRAGMA wal_checkpoint(PASSIVE);")
+    except Exception:
+        pass
 
     # مایگریشن: اگر جدول قدیمی با ستون link وجود دارد، حذف و بازسازی کن
     cur = await _db.execute("PRAGMA table_info(force_join_channels)")
